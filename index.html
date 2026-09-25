@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Gate Board</title>
+  <meta name="description" content="Launch-readiness dashboard for Nutratology's Amazon Canada and USA product launches.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230E9F6E'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11.5' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M6 12.5l4 4L18 8" /></svg>
+        </span>
+        <div class="brand-text">
+          <span class="brand-name">Gate Board</span>
+          <span class="brand-sub">Nutratology launch · Product A</span>
+        </div>
+      </div>
+
+      <div class="market-switch" role="group" aria-label="Marketplace">
+        <button class="market-tab" data-market="CA" aria-pressed="true" type="button"><span class="flag-dot ca"></span>Canada</button>
+        <button class="market-tab" data-market="US" aria-pressed="false" type="button"><span class="flag-dot us"></span>USA</button>
+      </div>
+
+      <div class="topbar-actions">
+        <span class="conn-badge" id="connBadge" data-state="loading"><span class="conn-dot"></span><span id="connText">Loading…</span></span>
+        <button id="copyBtn" class="btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>
+          <span>Copy outstanding</span>
+        </button>
+        <button id="playbookBtn" class="btn" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></svg>
+          <span>Playbook</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="setup-note" id="setupNote" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg>
+    <span>Statuses are saved in this browser only. Connect Supabase to share them with the team (see the README).</span>
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <section class="card readiness">
+        <div class="ring-wrap">
+          <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle class="ring-bg" cx="60" cy="60" r="50"/>
+            <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="50"/>
+          </svg>
+          <div class="ring-label">
+            <span class="ring-pct" id="ringPct">0%</span>
+            <span class="ring-cap">ready</span>
+          </div>
+        </div>
+        <div class="readiness-text">
+          <h2 id="readinessTitle">Canada launch</h2>
+          <p><span class="mono" id="progressOverallText">0 / 0</span> items complete</p>
+          <div class="mini-bar"><span id="progressBlockFill"></span></div>
+          <p class="muted"><span class="mono" id="progressBlockText">0 / 0</span> blocking items ready</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3 class="card-title">Launch gates</h3>
+        <ol class="gates" id="gateStrip"></ol>
+      </section>
+
+      <section class="card nav-card">
+        <h3 class="card-title" id="navTitle">Workstreams</h3>
+        <nav class="group-nav" id="groupNav"></nav>
+      </section>
+    </aside>
+
+    <main class="main">
+      <section class="stats" id="stats" aria-label="Summary"></section>
+
+      <section class="toolbar">
+        <label class="search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="search" id="searchInput" placeholder="Search tasks, owners or IDs" aria-label="Search">
+        </label>
+        <div class="segmented" id="phaseGroup" role="group" aria-label="Phase">
+          <button data-phase="all" class="active" type="button">All phases</button>
+          <button data-phase="pre" type="button">Pre-launch</button>
+          <button data-phase="post" type="button">Post-launch</button>
+        </div>
+        <div class="filters">
+          <label class="select-wrap">
+            <span>Group</span>
+            <select id="groupBy" aria-label="Group by">
+              <option value="section">Workstream</option>
+              <option value="timeline">Timeline</option>
+              <option value="owner">Owner</option>
+            </select>
+          </label>
+          <label class="select-wrap">
+            <span>Status</span>
+            <select id="statusFilter" aria-label="Status filter">
+              <option value="all">All</option>
+              <option value="open">Open</option>
+              <option value="not_started">Not started</option>
+              <option value="in_progress">In progress</option>
+              <option value="blocked">Blocked</option>
+              <option value="done">Done</option>
+              <option value="na">N/A</option>
+            </select>
+          </label>
+          <label class="select-wrap">
+            <span>Owner</span>
+            <select id="ownerFilter" aria-label="Owner filter"></select>
+          </label>
+          <label class="switch">
+            <input type="checkbox" id="blockingOnly">
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            <span>Blocking only</span>
+          </label>
+        </div>
+      </section>
+
+      <div class="list-head">
+        <p class="result-count" id="resultCount"></p>
+        <div class="legend">
+          <span><span class="src-dot src-OBS"></span>Proven practice</span>
+          <span><span class="src-dot src-ADD"></span>Required addition</span>
+          <span><span class="src-dot src-VERIFY"></span>Verify first</span>
+        </div>
+      </div>
+
+      <div id="sections"></div>
+    </main>
+  </div>
+
+  <div class="status-menu" id="statusMenu" role="menu" hidden></div>
+
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="playbookDrawer" aria-label="Playbook" aria-hidden="true">
+    <div class="drawer-head">
+      <div class="segmented drawer-tabs">
+        <button class="drawer-tab active" data-tab="process" type="button">Process</button>
+        <button class="drawer-tab" data-tab="lessons" type="button">Lessons learned</button>
+      </div>
+      <button class="icon-btn" id="drawerClose" type="button" aria-label="Close playbook">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
+  <div class="modal-backdrop" id="copyModal" hidden>
+    <div class="modal" role="dialog" aria-label="Outstanding items">
+      <div class="modal-head">
+        <h2>Outstanding items</h2>
+        <button class="icon-btn" id="copyModalClose" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="modal-hint">Copy this text and paste it into the launch channel.</p>
+      <textarea id="copyText" readonly></textarea>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="data/checklist.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

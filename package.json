@@ -1,0 +1,14 @@
+{
+  "name": "gate-board",
+  "private": true,
+  "description": "Launch-readiness dashboard for Amazon Canada and USA supplement launches.",
+  "type": "module",
+  "scripts": {
+    "build-data": "node scripts/build-data.mjs",
+    "serve": "node tests/server.mjs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.55.0"
+  }
+}
