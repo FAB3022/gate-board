@@ -378,7 +378,10 @@
       </button>`;
     $('productChips').innerHTML = chip('all', `All products (${products.length})`, allSum, ICON.grid) +
       '<span class="chip-divider" aria-hidden="true"></span>' +
-      products.map(p => chip(p.id, p.flavour || p.name, summaryOf(unitsFor(state.market, p.id)), '', p.name)).join('');
+      products.map(p => chip(p.id, p.flavour || p.name, summaryOf(unitsFor(state.market, p.id)), '', p.name)).join('') +
+      `<button type="button" class="product-chip add-chip" id="addProductBtn" data-add-product>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add product</span>
+      </button>`;
     $('brandSub').textContent = `Nutratology · ${MARKET_LONG[state.market]} · ${products.length} product${products.length === 1 ? '' : 's'}`;
   }
 
@@ -1425,13 +1428,27 @@
     $('taskForm').addEventListener('submit', submitForm);
     $('fMarket').addEventListener('change', () => fillSectionOptions(null));
     $('fPhase').addEventListener('change', () => fillSectionOptions(null));
-    $('addProductBtn').addEventListener('click', () => openProductForm(null));
     $('productFormClose').addEventListener('click', closeProductForm);
     $('productFormCancel').addEventListener('click', closeProductForm);
     $('productForm').addEventListener('submit', submitProductForm);
     $('productRemoveBtn').addEventListener('click', () => { $('productRemoveConfirm').hidden = false; });
     $('productRemoveCancel').addEventListener('click', () => { $('productRemoveConfirm').hidden = true; });
     $('productRemoveConfirmBtn').addEventListener('click', () => removeProduct(state.editingProductId));
+    $('updateReload').addEventListener('click', () => location.reload());
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
+    setInterval(checkForUpdate, 5 * 60 * 1000);
+  }
+
+  // An open tab keeps running old code after a new version is published; offer a reload instead.
+  const BUILD = (document.querySelector('meta[name="build"]') || {}).content || '';
+  async function checkForUpdate() {
+    if (!BUILD || location.protocol === 'file:') return;
+    try {
+      const res = await fetch(`${location.pathname}?build-check=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const m = (await res.text()).match(/<meta name="build" content="([a-f0-9]+)">/);
+      if (m && m[1] !== BUILD) $('updateBanner').hidden = false;
+    } catch (e) { /* offline: try again later */ }
   }
 
   async function loadWithRetry() {
@@ -1466,6 +1483,7 @@
     await loadWithRetry();
     renderAll();
     openFromHash();
+    checkForUpdate();
     store.subscribe({
       records: records => {
         for (const r of records) state.records[r.item_id] = r;

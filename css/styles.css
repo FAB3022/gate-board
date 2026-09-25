@@ -403,6 +403,11 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .modal-head h2 { font-size: 17px; }
 .modal-hint { font-size: 13px; color: var(--text-2); }
 #copyText { width: 100%; min-height: 340px; flex: 1; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text); padding: 12px; font: 12.5px/1.55 'Geist Mono', monospace; resize: vertical; }
+.update-banner {
+  position: fixed; top: 76px; left: 50%; transform: translateX(-50%); z-index: 45; display: flex; align-items: center; gap: 14px;
+  background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 12px 10px 16px;
+  box-shadow: var(--shadow-lg); font-size: 13.5px; font-weight: 600; max-width: calc(100vw - 32px);
+}
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg);
   padding: 10px 18px; border-radius: 12px; font-size: 13px; font-weight: 600; z-index: 50; box-shadow: var(--shadow-lg);
@@ -504,10 +509,11 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 /* Product bar */
 .product-bar { max-width: 1320px; margin: 16px auto 0; padding: 0 20px; }
 .product-bar-inner {
-  display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px;
 }
-.product-chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; padding: 2px; }
+.product-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; padding: 2px; }
+.product-chip.add-chip { border: 1px dashed var(--border-strong); color: var(--accent); }
+.product-chip.add-chip:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 .product-chip {
   display: inline-flex; align-items: center; gap: 9px; border: 1px solid transparent; background: transparent;
   padding: 7px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--text-2); white-space: nowrap; flex: none;
@@ -605,9 +611,10 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .layout { padding: 16px 16px 64px; gap: 16px; }
   .setup-note { padding: 0 16px; }
   .product-bar { padding: 0 16px; }
-  .product-bar-inner { flex-wrap: wrap; }
-  #addProductBtn { width: 100%; justify-content: center; }
-  #addProductBtn span { display: inline; }
+  .product-chip { flex: 1 1 100%; justify-content: flex-start; }
+  .product-chip .chip-bar { margin-left: auto; }
+  .chip-divider { display: none; }
+  .product-chip.add-chip { justify-content: center; }
   .sidebar { grid-template-columns: minmax(0, 1fr); }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .task { grid-template-columns: 26px minmax(0, 1fr); gap: 12px; }

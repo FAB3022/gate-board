@@ -52,6 +52,16 @@ node scripts/build-data.mjs ../amazon-product-launch/amazon-product-launch/refer
 
 The script stops with an error if a table row is malformed or a lesson points to a checklist ID that does not exist.
 
+## Publishing an update
+
+GitHub Pages lets browsers cache files for 10 minutes, so every CSS and JS link in `index.html` carries a fingerprint of the file's contents (`?v=…`). After changing any file, run:
+
+```bash
+node scripts/stamp-assets.mjs
+```
+
+The tests fail if a fingerprint is out of date. Anyone who has the dashboard open when a new version goes live sees a "new version available" notice with a Reload button.
+
 ## Tests
 
 ```bash

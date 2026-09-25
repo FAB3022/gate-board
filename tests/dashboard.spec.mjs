@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { stamp } from '../scripts/stamp-assets.mjs';
 
 const rows = page => page.locator('#sections .task');
 const row = (page, key) => page.locator(`[id="row-${key}"]`);
@@ -40,6 +42,73 @@ function trackErrors(page) {
   page.on('console', m => { if (m.type() === 'error' && !/fonts\.g/.test(m.text())) errors.push(m.text()); });
   return errors;
 }
+
+test.describe('release safety and layout', () => {
+  test('every local file link carries its current content fingerprint', () => {
+    const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+    const local = [...html.matchAll(/(?:src|href)="((?!https?:|data:)[^"]+\.(?:js|css)[^"]*)"/g)].map(m => m[1]);
+    expect(local.length).toBeGreaterThanOrEqual(7);
+    for (const ref of local) expect(ref).toMatch(/\?v=[a-f0-9]{10}$/);
+    expect(html).toMatch(/<meta name="build" content="[a-f0-9]{10}">/);
+    expect(stamp(html), 'Run: node scripts/stamp-assets.mjs').toBe(html);
+  });
+
+  for (const [w, h] of [[2560, 1280], [1440, 900], [1100, 800], [390, 844]]) {
+    test(`product bar lines up with the dashboard and Add product works at ${w}px`, async ({ page }) => {
+      await page.setViewportSize({ width: w, height: h });
+      await page.goto('./');
+      await expect(chip(page, 'all')).toBeVisible();
+      const bar = await page.locator('.product-bar-inner').boundingBox();
+      const layout = await page.locator('.layout').boundingBox();
+      const pad = await page.locator('.layout').evaluate(el => parseFloat(getComputedStyle(el).paddingLeft));
+      expect(Math.abs(bar.x - (layout.x + pad))).toBeLessThanOrEqual(1);
+      expect(Math.abs((bar.x + bar.width) - (layout.x + layout.width - pad))).toBeLessThanOrEqual(1);
+      const btn = await page.locator('#addProductBtn').boundingBox();
+      expect(btn.x).toBeGreaterThanOrEqual(bar.x);
+      expect(btn.x + btn.width).toBeLessThanOrEqual(bar.x + bar.width + 0.5);
+      expect(btn.y).toBeGreaterThanOrEqual(bar.y);
+      expect(btn.y + btn.height).toBeLessThanOrEqual(bar.y + bar.height + 0.5);
+      // Every chip, the Add product chip included, sits on a row with the same height and centre line as its neighbours.
+      const boxes = await page.locator('#productChips .product-chip').evaluateAll(els => els.map(el => {
+        const r = el.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, mid: r.top + r.height / 2, h: r.height };
+      }));
+      expect(boxes.length).toBe(6);
+      const heights = boxes.map(b => b.h);
+      expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+      for (let i = 0; i < boxes.length; i++) {
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i], b = boxes[j];
+          const overlapX = a.left < b.right - 0.5 && b.left < a.right - 0.5;
+          const overlapY = a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5;
+          expect(overlapX && overlapY, `chips ${i} and ${j} overlap`).toBe(false);
+          if (overlapY) expect(Math.abs(a.mid - b.mid)).toBeLessThanOrEqual(1);
+        }
+      }
+      if (w >= 1440) {
+        const rowsUsed = new Set(boxes.map(b => Math.round(b.mid)));
+        expect(rowsUsed.size, 'all products fit on one row').toBe(1);
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+      await page.locator('#addProductBtn').click();
+      await expect(page.locator('#productFormModal')).toBeVisible();
+      await expect(page.locator('#pName')).toBeFocused();
+      await expect(page.locator('#productForm')).toBeInViewport();
+    });
+  }
+
+  test('an open tab offers a reload when a newer version is published', async ({ page }) => {
+    await page.route(/build-check=/, r => r.fulfill({ contentType: 'text/html', body: '<meta name="build" content="0123456789">' }));
+    await page.goto('./');
+    await expect(page.locator('#updateBanner')).toBeVisible();
+    await expect(page.locator('#updateBanner')).toContainText('A new version of Gate Board is available.');
+    await page.unroute(/build-check=/);
+    await page.locator('#updateReload').click();
+    await page.waitForLoadState('load');
+    await expect(chip(page, 'all')).toBeVisible();
+    await expect(page.locator('#updateBanner')).toBeHidden();
+  });
+});
 
 test.describe('products', () => {
   test('opens on the all-products overview with the Electrolytes flavours', async ({ page }) => {
@@ -472,7 +541,7 @@ window.supabase = { createClient(url, key) {
 test.describe('shared mode (simulated Supabase)', () => {
   test.beforeEach(async ({ page }) => {
     await page.route('**/supabase-js@*/**', r => r.fulfill({ contentType: 'text/javascript', body: FAKE_SUPABASE }));
-    await page.route('**/config.js', r => r.fulfill({
+    await page.route('**/config.js*', r => r.fulfill({
       contentType: 'text/javascript',
       body: "window.GATE_BOARD_CONFIG = { supabaseUrl: 'https://example.supabase.co', supabaseAnonKey: 'anon-test' };",
     }));
@@ -570,7 +639,7 @@ test.describe('shared mode (simulated Supabase)', () => {
 });
 
 test('real Supabase library loads and an unreachable project is reported', async ({ page }) => {
-  await page.route('**/config.js', r => r.fulfill({
+  await page.route('**/config.js*', r => r.fulfill({
     contentType: 'text/javascript',
     body: "window.GATE_BOARD_CONFIG = { supabaseUrl: 'http://127.0.0.1:9', supabaseAnonKey: 'anon-test' };",
   }));
