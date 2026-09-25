@@ -20,7 +20,7 @@
         </span>
         <div class="brand-text">
           <span class="brand-name">Gate Board</span>
-          <span class="brand-sub">Nutratology launch · Product A</span>
+          <span class="brand-sub" id="brandSub">Nutratology launch tracker</span>
         </div>
       </div>
 
@@ -51,6 +51,16 @@
     <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.5"/></svg>
     <span>Statuses are saved in this browser only. Connect Supabase to share them with the team (see the README).</span>
   </div>
+
+  <nav class="product-bar" aria-label="Products">
+    <div class="product-bar-inner">
+      <div class="product-chips" id="productChips"></div>
+      <button class="btn btn-sm" id="addProductBtn" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Add product</span>
+      </button>
+    </div>
+  </nav>
 
   <div class="layout">
     <aside class="sidebar">
@@ -85,6 +95,9 @@
     </aside>
 
     <main class="main">
+      <section id="overview" hidden></section>
+
+      <div id="productView">
       <section class="stats" id="stats" aria-label="Summary"></section>
 
       <section class="toolbar">
@@ -140,6 +153,7 @@
       </div>
 
       <div id="sections"></div>
+      </div>
     </main>
   </div>
 
@@ -256,6 +270,67 @@
     </form>
   </div>
 
+  <div class="modal-backdrop" id="productFormModal" hidden>
+    <form class="modal task-form" id="productForm" novalidate>
+      <div class="modal-head">
+        <h2 id="productFormTitle">Add a product</h2>
+        <button class="icon-btn" id="productFormClose" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="modal-hint">Each product gets its own status for every per-product task. Once-per-launch tasks are shared by all products in the marketplace.</p>
+      <div class="form-grid">
+        <label class="field span-2">
+          <span class="field-label">Product name <b aria-hidden="true">*</b></span>
+          <input type="text" id="pName" maxlength="80" placeholder="e.g. Electrolytes · Lemon Lime" required>
+          <span class="field-error" id="pNameError" hidden>Enter a product name.</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Marketplace</span>
+          <select id="pMarket"><option value="CA">Canada · Amazon.ca</option><option value="US">USA · Amazon.com</option></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Flavour or variant</span>
+          <input type="text" id="pFlavour" maxlength="60" placeholder="e.g. Lemon Lime">
+        </label>
+        <label class="field">
+          <span class="field-label">Format</span>
+          <input type="text" id="pFormat" maxlength="60" list="formatOptions" placeholder="e.g. Stick pack">
+          <datalist id="formatOptions"><option value="Capsule"></option><option value="Powder"></option><option value="Resin"></option><option value="Stick pack"></option><option value="Softgel"></option><option value="Gummy"></option><option value="Liquid"></option></datalist>
+        </label>
+        <label class="field">
+          <span class="field-label">Count or size</span>
+          <input type="text" id="pSize" maxlength="60" placeholder="e.g. 20 sticks × 4 g, 60 ct">
+        </label>
+        <label class="field">
+          <span class="field-label">ASIN (optional)</span>
+          <input type="text" id="pAsin" maxlength="10" placeholder="10 characters" autocomplete="off">
+          <span class="field-error" id="pAsinError" hidden>An ASIN is 10 letters or numbers.</span>
+        </label>
+        <label class="field">
+          <span class="field-label">SKU (optional)</span>
+          <input type="text" id="pSku" maxlength="60" autocomplete="off">
+        </label>
+        <label class="field span-2">
+          <span class="field-label">Notes</span>
+          <textarea id="pNotes" maxlength="500" rows="2" placeholder="Vine counts, FBA/FBM, anything specific to this product"></textarea>
+        </label>
+      </div>
+      <div class="confirm-row" id="productRemoveConfirm" hidden>
+        <span>Remove this product from the launch? Its task statuses are kept, but it will no longer show or count toward progress.</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-sm" id="productRemoveCancel">Keep product</button>
+        <button type="button" class="btn btn-sm btn-danger-solid" id="productRemoveConfirmBtn">Remove product</button>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-danger form-remove" type="button" id="productRemoveBtn" hidden>Remove product</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" id="productFormCancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="productFormSubmit">Add product</button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal-backdrop" id="copyModal" hidden>
     <div class="modal" role="dialog" aria-label="Outstanding items">
       <div class="modal-head">
@@ -275,6 +350,7 @@
   <script src="config.js"></script>
   <script src="data/checklist.js"></script>
   <script src="data/examples.js"></script>
+  <script src="data/products.js"></script>
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
 </body>

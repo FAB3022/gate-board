@@ -1,11 +1,12 @@
 (function () {
   const DATA = window.CHECKLIST;
   const EXAMPLES = window.EXAMPLE_ITEMS || [];
+  const DEFAULT_PRODUCTS = window.DEFAULT_PRODUCTS || [];
   const MARKET_NAMES = { CA: 'CANADA (Amazon.ca)', US: 'USA (Amazon.com)' };
   const MARKET_TITLES = { CA: 'Canada launch', US: 'USA launch' };
   const MARKET_LONG = { CA: 'Canada · Amazon.ca', US: 'USA · Amazon.com' };
 
-  // Gate 3 covers every pre-launch BLOCKING item, per the skill's shared foundation.
+  // Gate 3 covers every pre-launch BLOCKING task, per the skill's shared foundation.
   const GATES = [
     { n: 1, name: 'Creative & Copy Freeze', when: 'T-14', ids: { CA: ['CA-PRE-059', 'CA-PRE-067'], US: ['US-PRE-065', 'US-PRE-066'] } },
     { n: 2, name: 'Compliance Sign-off', when: 'T-7', ids: { CA: ['CA-PRE-110'], US: ['US-PRE-100'] } },
@@ -14,11 +15,11 @@
   ];
 
   const STATUSES = {
-    not_started: { label: 'Not started', icon: '⚪' },
-    in_progress: { label: 'In progress', icon: '⏳' },
-    blocked: { label: 'Blocked', icon: '❌' },
-    done: { label: 'Done', icon: '✅' },
-    na: { label: 'N/A', icon: '➖' },
+    not_started: { label: 'Not started', short: 'To do', icon: '⚪' },
+    in_progress: { label: 'In progress', short: 'Doing', icon: '⏳' },
+    blocked: { label: 'Blocked', short: 'Blocked', icon: '❌' },
+    done: { label: 'Done', short: 'Done', icon: '✅' },
+    na: { label: 'N/A', short: 'N/A', icon: '➖' },
   };
   const SOURCES = {
     OBS: { label: 'Proven practice', long: 'OBS: observed in past launches; this is how the team actually works.' },
@@ -42,6 +43,9 @@
     ext: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
     edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg>',
     trash: '<svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+    grid: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+    box: '<svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg>',
+    users: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6"/></svg>',
   };
 
   const ROLES = [
@@ -102,25 +106,33 @@
     });
   }
 
+  const savedView = readLocal('gate-board:view:v1', {});
   const state = {
     market: 'CA',
+    view: { CA: typeof savedView.CA === 'string' ? savedView.CA : 'all', US: typeof savedView.US === 'string' ? savedView.US : 'all' },
     phase: 'all',
     status: 'all',
     owner: 'all',
     groupBy: 'section',
     blockingOnly: false,
     search: '',
+    matrixOpenOnly: true,
     records: {},
     customRaw: {},
+    productRaw: {},
     openLessons: new Set(),
     collapsed: new Set(readLocal('gate-board:collapsed:v2', [])),
-    panelId: null,
+    panelKey: null,
     editingId: null,
+    editingProductId: null,
     confirmRemove: false,
   };
   for (const ex of EXAMPLES) state.customRaw[ex.id] = ex;
+  for (const p of DEFAULT_PRODUCTS) state.productRaw[p.id] = p;
   let ITEMS = { CA: [], US: [] };
+  let PRODUCTS = { CA: [], US: [] };
   let itemById = {};
+  let productById = {};
   let store = null;
   let pendingRender = false;
   let loaded = false;
@@ -171,28 +183,38 @@
     if (isNaN(d)) return ymd;
     return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
   }
-  function randomId(market) {
+  function randomChars(n) {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    const bytes = new Uint8Array(6);
+    const bytes = new Uint8Array(n);
     crypto.getRandomValues(bytes);
-    return `${market}-NEW-${[...bytes].map(b => chars[b % 36]).join('')}`;
+    return [...bytes].map(b => chars[b % 36]).join('');
   }
+  function ringSvg(fraction) {
+    const c = 2 * Math.PI * 22;
+    return `<svg viewBox="0 0 54 54" aria-hidden="true"><circle class="bg" cx="27" cy="27" r="22"/><circle class="fg" cx="27" cy="27" r="22" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - fraction)}"/></svg>`;
+  }
+  const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+  function sanitizeOrigin(o) {
+    if (!o || typeof o !== 'object') return null;
+    return {
+      type: o.type === 'slack' ? 'slack' : 'other',
+      channel: str(o.channel, 80),
+      date: /^\d{4}-\d{2}-\d{2}$/.test(o.date) ? o.date : '',
+      summary: str(o.summary, 1200),
+    };
+  }
+  const safeLink = v => (/^https:\/\/[^\s"'<>]+$/i.test(str(v, 500)) ? str(v, 500) : '');
 
-  // Added tasks can come from other viewers (shared mode), so every field is checked before use.
+  // Added tasks and products can come from other viewers (shared mode), so every field is checked before use.
   function sanitizeCustom(raw) {
-    if (!raw || typeof raw !== 'object') return null;
+    if (!raw || typeof raw !== 'object' || raw.removed) return null;
     const id = String(raw.id || '');
     if (!/^(CA|US)-NEW-[a-z0-9]{6}$/.test(id)) return null;
-    if (raw.removed) return null;
-    const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
     const title = str(raw.title, 200);
     if (!title) return null;
-    const market = id.slice(0, 2);
-    const o = raw.origin && typeof raw.origin === 'object' ? raw.origin : null;
-    const detail = str(raw.detail, 1000);
     return {
       id,
-      market,
+      market: id.slice(0, 2),
       phase: raw.phase === 'post' ? 'post' : 'pre',
       section: str(raw.section, 120) || 'Added tasks',
       when: /^(T([+-]\d{1,3}|0)|Weekly)$/.test(raw.when) ? raw.when : 'T0',
@@ -201,17 +223,34 @@
       blocking: raw.blocking === true,
       source: SOURCES[raw.source] ? raw.source : 'ADD',
       title,
-      detail,
+      detail: str(raw.detail, 1000),
       task: title,
-      link: /^https:\/\/[^\s"'<>]+$/i.test(str(raw.link, 500)) ? str(raw.link, 500) : '',
-      origin: o ? {
-        type: o.type === 'slack' ? 'slack' : 'other',
-        channel: str(o.channel, 80),
-        date: /^\d{4}-\d{2}-\d{2}$/.test(o.date) ? o.date : '',
-        summary: str(o.summary, 1200),
-      } : null,
+      link: safeLink(raw.link),
+      origin: sanitizeOrigin(raw.origin),
       createdAt: str(raw.createdAt, 40),
       custom: true,
+    };
+  }
+  function sanitizeProduct(raw) {
+    if (!raw || typeof raw !== 'object' || raw.removed) return null;
+    const id = String(raw.id || '');
+    if (!/^[a-z0-9]{6}$/.test(id) || !['CA', 'US'].includes(raw.market)) return null;
+    const name = str(raw.name, 80);
+    if (!name) return null;
+    return {
+      id,
+      market: raw.market,
+      name,
+      flavour: str(raw.flavour, 60),
+      format: str(raw.format, 60),
+      size: str(raw.size, 60),
+      asin: /^[A-Z0-9]{10}$/.test(str(raw.asin, 10)) ? str(raw.asin, 10) : '',
+      sku: str(raw.sku, 60),
+      notes: str(raw.notes, 500),
+      origin: sanitizeOrigin(raw.origin),
+      link: safeLink(raw.link),
+      order: Number.isFinite(raw.order) ? raw.order : 999,
+      createdAt: str(raw.createdAt, 40),
     };
   }
 
@@ -235,45 +274,117 @@
     itemById = {};
     for (const mk of ['CA', 'US']) for (const it of ITEMS[mk]) itemById[it.id] = it;
   }
+  function rebuildProducts() {
+    const all = Object.values(state.productRaw).map(sanitizeProduct).filter(Boolean)
+      .sort((a, b) => a.order - b.order || (a.createdAt || '').localeCompare(b.createdAt || '') || a.id.localeCompare(b.id));
+    PRODUCTS = { CA: all.filter(p => p.market === 'CA'), US: all.filter(p => p.market === 'US') };
+    productById = {};
+    for (const p of all) productById[p.id] = p;
+    for (const mk of ['CA', 'US']) {
+      if (state.view[mk] !== 'all' && !PRODUCTS[mk].some(p => p.id === state.view[mk])) state.view[mk] = 'all';
+    }
+  }
 
   function sectionsFor(market, phase) {
     return [...new Set(BUILTIN[market].filter(it => it.phase === phase).map(it => it.section))];
   }
 
-  function statusOf(id) {
-    const r = state.records[id];
+  // ---------- Units: a task for one product, or a once-per-launch task ----------
+
+  function view() { return state.view[state.market]; }
+  function unitKey(item, pid) { return item.scope === 'P' ? `${item.id}:${pid}` : item.id; }
+  function parseKey(key) {
+    const [id, pid] = String(key).split(':');
+    const item = itemById[id];
+    if (!item) return null;
+    if (item.scope === 'P') {
+      const product = productById[pid];
+      if (!product || product.market !== item.market) return null;
+      return { key: `${id}:${pid}`, item, product };
+    }
+    return { key: id, item, product: null };
+  }
+  function unitsFor(market, v) {
+    const pids = v === 'all' ? PRODUCTS[market].map(p => p.id) : [v];
+    const out = [];
+    for (const item of ITEMS[market]) {
+      if (item.scope === 'L') out.push({ key: item.id, item, product: null });
+      else for (const pid of pids) out.push({ key: `${item.id}:${pid}`, item, product: productById[pid] });
+    }
+    return out;
+  }
+
+  function statusOf(key) {
+    const r = state.records[key];
     return r && STATUSES[r.status] ? r.status : 'not_started';
   }
-  function noteOf(id) {
-    const r = state.records[id];
+  function noteOf(key) {
+    const r = state.records[key];
     return (r && typeof r.note === 'string' && r.note) || '';
   }
   // N/A only counts once a reason is recorded (skill rule: "N/A items carry a reason").
-  function isComplete(id) {
-    const s = statusOf(id);
-    return s === 'done' || (s === 'na' && noteOf(id).trim() !== '');
+  function isComplete(key) {
+    const s = statusOf(key);
+    return s === 'done' || (s === 'na' && noteOf(key).trim() !== '');
   }
 
-  function gateIds(gate, market) {
+  function gateItemIds(gate, market) {
     if (gate.allPreBlocking) return ITEMS[market].filter(it => it.phase === 'pre' && it.blocking).map(it => it.id);
     return gate.ids[market];
   }
-  function gatesFor(id) {
-    const it = itemById[id];
-    return it ? GATES.filter(g => gateIds(g, it.market).includes(id)) : [];
+  function gatesForItem(item) {
+    return GATES.filter(g => gateItemIds(g, item.market).includes(item.id));
   }
-  function gateState(gate, market) {
-    const ids = gateIds(gate, market);
-    const done = ids.filter(isComplete).length;
+  function gateState(gate, market, v) {
+    const ids = new Set(gateItemIds(gate, market));
+    const units = unitsFor(market, v).filter(u => ids.has(u.item.id));
+    const done = units.filter(u => isComplete(u.key)).length;
     let s = 'pending';
-    if (ids.some(id => statusOf(id) === 'blocked')) s = 'risk';
-    else if (done === ids.length) s = 'pass';
-    return { state: s, done, total: ids.length };
+    if (units.some(u => statusOf(u.key) === 'blocked')) s = 'risk';
+    else if (done === units.length) s = 'pass';
+    return { state: s, done, total: units.length };
+  }
+  function summaryOf(units) {
+    const done = units.filter(u => isComplete(u.key)).length;
+    const blocking = units.filter(u => u.item.blocking);
+    return {
+      total: units.length,
+      done,
+      pct: units.length ? Math.round((done / units.length) * 100) : 0,
+      blockingTotal: blocking.length,
+      blockingOpen: blocking.filter(u => !isComplete(u.key)).length,
+      blocked: units.filter(u => statusOf(u.key) === 'blocked').length,
+      inProgress: units.filter(u => statusOf(u.key) === 'in_progress').length,
+      doneOnly: units.filter(u => statusOf(u.key) === 'done').length,
+    };
+  }
+  function nextGate(market, v) {
+    for (const g of GATES) {
+      const gs = gateState(g, market, v);
+      if (gs.state !== 'pass') return { g, gs };
+    }
+    return null;
+  }
+
+  // ---------- Header, product bar, sidebar ----------
+
+  function renderProductBar() {
+    const products = PRODUCTS[state.market];
+    const allSum = summaryOf(unitsFor(state.market, 'all'));
+    const chip = (v, label, sum, icon, full) => `<button type="button" class="product-chip" data-view="${esc(v)}" aria-pressed="${view() === v}"${full ? ` title="${esc(full)}"` : ''}>
+        ${icon || ''}<span>${esc(label)}</span>
+        <span class="chip-bar"><span style="width:${sum.pct}%"></span></span><span class="chip-pct">${sum.pct}%</span>
+        ${sum.blocked ? `<span class="chip-blocked" title="${sum.blocked} blocked"></span>` : ''}
+      </button>`;
+    $('productChips').innerHTML = chip('all', `All products (${products.length})`, allSum, ICON.grid) +
+      '<span class="chip-divider" aria-hidden="true"></span>' +
+      products.map(p => chip(p.id, p.flavour || p.name, summaryOf(unitsFor(state.market, p.id)), '', p.name)).join('');
+    $('brandSub').textContent = `Nutratology · ${MARKET_LONG[state.market]} · ${products.length} product${products.length === 1 ? '' : 's'}`;
   }
 
   function renderGates() {
     $('gateStrip').innerHTML = GATES.map(g => {
-      const gs = gateState(g, state.market);
+      const gs = gateState(g, state.market, view());
       const label = gs.state === 'pass' ? 'Passed' : gs.state === 'risk' ? 'At risk' : 'Pending';
       const icon = gs.state === 'pass' ? ICON.check : gs.state === 'risk' ? '!' : g.n;
       return `<li class="gate" data-gate="${g.n}" data-state="${gs.state}">
@@ -288,27 +399,24 @@
   }
 
   function renderSummary() {
-    const items = ITEMS[state.market];
-    const done = items.filter(it => isComplete(it.id)).length;
-    const blocking = items.filter(it => it.blocking);
-    const bdone = blocking.filter(it => isComplete(it.id)).length;
-    const pct = Math.round((done / items.length) * 100);
+    const v = view();
+    const sum = summaryOf(unitsFor(state.market, v));
     const circumference = 2 * Math.PI * 50;
     const ring = $('ringFg');
     ring.style.strokeDasharray = String(circumference);
-    ring.style.strokeDashoffset = String(circumference * (1 - done / items.length));
-    $('ringPct').textContent = pct + '%';
-    $('readinessTitle').textContent = MARKET_TITLES[state.market];
-    $('progressOverallText').textContent = `${done} / ${items.length}`;
-    $('progressBlockText').textContent = `${bdone} / ${blocking.length}`;
-    $('progressBlockFill').style.width = Math.round((bdone / blocking.length) * 100) + '%';
+    ring.style.strokeDashoffset = String(circumference * (1 - (sum.total ? sum.done / sum.total : 0)));
+    $('ringPct').textContent = sum.pct + '%';
+    $('readinessTitle').textContent = v === 'all' ? MARKET_TITLES[state.market] : productById[v].name;
+    $('progressOverallText').textContent = `${sum.done} / ${sum.total}`;
+    $('progressBlockText').textContent = `${sum.blockingTotal - sum.blockingOpen} / ${sum.blockingTotal}`;
+    $('progressBlockFill').style.width = (sum.blockingTotal ? Math.round(((sum.blockingTotal - sum.blockingOpen) / sum.blockingTotal) * 100) : 0) + '%';
+    if (v === 'all') return;
 
-    const count = s => items.filter(it => statusOf(it.id) === s).length;
     const tiles = [
-      { key: 'blocking', label: 'Blocking open', value: blocking.length - bdone, hint: `of ${blocking.length} blocking tasks`, color: 'var(--blocked)', soft: 'var(--blocked-soft)', icon: ICON.lock },
-      { key: 'blocked', label: 'Blocked', value: count('blocked'), hint: 'need a decision or input', color: 'var(--blocked)', soft: 'var(--blocked-soft)', icon: ICON.ban },
-      { key: 'in_progress', label: 'In progress', value: count('in_progress'), hint: 'being worked on', color: 'var(--progress)', soft: 'var(--progress-soft)', icon: ICON.clock },
-      { key: 'done', label: 'Done', value: count('done'), hint: `of ${items.length} tasks`, color: 'var(--done)', soft: 'var(--done-soft)', icon: ICON.done },
+      { key: 'blocking', label: 'Blocking open', value: sum.blockingOpen, hint: `of ${sum.blockingTotal} blocking tasks`, color: 'var(--blocked)', soft: 'var(--blocked-soft)', icon: ICON.lock },
+      { key: 'blocked', label: 'Blocked', value: sum.blocked, hint: 'need a decision or input', color: 'var(--blocked)', soft: 'var(--blocked-soft)', icon: ICON.ban },
+      { key: 'in_progress', label: 'In progress', value: sum.inProgress, hint: 'being worked on', color: 'var(--progress)', soft: 'var(--progress-soft)', icon: ICON.clock },
+      { key: 'done', label: 'Done', value: sum.doneOnly, hint: `of ${sum.total} tasks`, color: 'var(--done)', soft: 'var(--done-soft)', icon: ICON.done },
     ];
     const activeKey = state.blockingOnly && state.status === 'open' ? 'blocking'
       : !state.blockingOnly && ['blocked', 'in_progress', 'done'].includes(state.status) ? state.status : null;
@@ -327,12 +435,15 @@
       owners.map(o => `<option value="${esc(o)}"${o === state.owner ? ' selected' : ''}>${esc(o)}</option>`).join('');
   }
 
-  function matches(it) {
+  // ---------- Product view: task list ----------
+
+  function matches(u) {
+    const it = u.item;
     if (state.phase !== 'all' && it.phase !== state.phase) return false;
     if (state.blockingOnly && !it.blocking) return false;
     if (state.owner !== 'all' && it.owner !== state.owner) return false;
-    if (state.status === 'open' && isComplete(it.id)) return false;
-    if (state.status !== 'all' && state.status !== 'open' && statusOf(it.id) !== state.status) return false;
+    if (state.status === 'open' && isComplete(u.key)) return false;
+    if (state.status !== 'all' && state.status !== 'open' && statusOf(u.key) !== state.status) return false;
     if (state.search) {
       const hay = `${it.id} ${it.title} ${it.detail} ${it.owner} ${it.section}`.toLowerCase();
       if (!hay.includes(state.search)) return false;
@@ -358,77 +469,82 @@
     }
     return { code: '', title: key };
   }
-  function orderedGroups(items) {
-    const keys = [...new Set(items.map(groupKeyOf))];
+  function orderedGroups(units) {
+    const keys = [...new Set(units.map(u => groupKeyOf(u.item)))];
     if (state.groupBy === 'timeline') keys.sort((a, b) => offset(a) - offset(b));
     if (state.groupBy === 'owner') keys.sort();
     return keys;
   }
-  // Visible tasks in the order they appear on screen; drives previous/next in the task panel.
-  function visibleOrder() {
-    const items = ITEMS[state.market].filter(matches);
+  function visibleUnits() {
+    if (view() === 'all') return [];
+    const units = unitsFor(state.market, view()).filter(matches);
     const out = [];
-    for (const key of orderedGroups(items)) out.push(...items.filter(it => groupKeyOf(it) === key));
+    for (const key of orderedGroups(units)) out.push(...units.filter(u => groupKeyOf(u.item) === key));
     return out;
   }
 
-  function taskHtml(it) {
-    const status = statusOf(it.id);
-    const note = noteOf(it.id);
+  function taskHtml(u) {
+    const it = u.item;
+    const key = u.key;
+    const status = statusOf(key);
+    const note = noteOf(key);
     const lessons = lessonsById[it.id];
     const showNote = status === 'blocked' || status === 'na';
     const placeholder = status === 'na' ? 'Why this does not apply (required)' : 'What is blocking this, and which role needs to act?';
-    const lessonOpen = lessons && state.openLessons.has(it.id);
-    return `<article class="task${state.panelId === it.id ? ' selected' : ''}" id="row-${it.id}" data-id="${it.id}" data-status="${status}">
-      <button type="button" class="check" data-check="${it.id}" aria-label="${status === 'done' ? 'Mark not started' : 'Mark done'}: ${it.id}" aria-pressed="${status === 'done'}">${ICON.check}</button>
+    const lessonOpen = lessons && state.openLessons.has(key);
+    return `<article class="task${state.panelKey === key ? ' selected' : ''}" id="row-${key}" data-key="${key}" data-status="${status}">
+      <button type="button" class="check" data-check="${key}" aria-label="${status === 'done' ? 'Mark not started' : 'Mark done'}: ${it.id}" aria-pressed="${status === 'done'}">${ICON.check}</button>
       <div class="task-body">
-        <div class="task-title"><button type="button" class="task-open" data-open="${it.id}">${esc(it.title)}</button></div>
+        <div class="task-title"><button type="button" class="task-open" data-open="${key}">${esc(it.title)}</button></div>
         ${it.detail ? `<div class="task-detail">${esc(it.detail)}</div>` : ''}
         <div class="task-meta">
           <span class="owner"><span class="avatar" style="--h:${hue(it.owner)}">${esc(initials(it.owner))}</span>${esc(it.owner)}</span>
           <span class="pill mono">${esc(it.when)}</span>
           ${it.blocking ? `<span class="pill blocking">${ICON.lock}Blocking</span>` : ''}
+          ${it.scope === 'L' ? `<span class="pill launch-wide" title="One status shared by every product in this launch">${ICON.users}Launch-wide</span>` : ''}
           ${it.custom ? '<span class="pill added">Added</span>' : ''}
           ${it.origin && it.origin.type === 'slack' ? `<span class="pill slack">${ICON.slack}From Slack</span>` : ''}
           ${it.source === 'VERIFY' ? '<span class="pill src-pill-VERIFY">Verify first</span>' : ''}
           ${it.source === 'ADD' ? '<span class="pill src-pill-ADD">Required addition</span>' : ''}
-          <span class="pill">${it.scope === 'L' ? 'Once per launch' : 'Per product'}</span>
           ${status === 'na' && !note.trim() ? `<span class="pill warn">${ICON.alert}Reason missing</span>` : ''}
           <span class="task-id mono" title="Checklist ID"><span class="src-dot src-${it.source}"></span> ${it.id}</span>
-          ${lessons ? `<button type="button" class="link-btn" data-lesson="${it.id}" aria-expanded="${lessonOpen}">${ICON.bulb}Why this step exists</button>` : ''}
+          ${lessons ? `<button type="button" class="link-btn" data-lesson="${key}" aria-expanded="${lessonOpen}">${ICON.bulb}Why this step exists</button>` : ''}
         </div>
-        ${showNote ? `<input type="text" class="note-input" data-id="${it.id}" maxlength="1000" placeholder="${placeholder}" value="${esc(note)}" aria-label="Note for ${it.id}">` : ''}
+        ${showNote ? `<input type="text" class="note-input" data-key="${key}" maxlength="1000" placeholder="${placeholder}" value="${esc(note)}" aria-label="Note for ${it.id}">` : ''}
         ${!showNote && note ? `<div class="note-snippet">${ICON.note}<span>${esc(note)}</span></div>` : ''}
-        ${lessonOpen ? lessons.map(l => `<div class="lesson">
-          <div class="l-head">Lesson ${l.n}: ${esc(l.what)}</div>
-          <div class="l-row"><b>Impact:</b> ${esc(l.impact)}</div>
-          <div class="l-row l-ctrl"><b>Control:</b> ${esc(l.control)}</div>
-        </div>`).join('') : ''}
+        ${lessonOpen ? lessons.map(lessonHtml).join('') : ''}
       </div>
       <div class="status-cell">
-        <button type="button" class="status-btn st-${status}" data-menu="${it.id}" aria-haspopup="menu" aria-label="Status for ${it.id}: ${STATUSES[status].label}">
+        <button type="button" class="status-btn st-${status}" data-menu="${key}" aria-haspopup="menu" aria-label="Status for ${it.id}: ${STATUSES[status].label}">
           <span class="st-dot"></span><span class="st-label">${STATUSES[status].label}</span>${ICON.caretSm}
         </button>
       </div>
     </article>`;
   }
+  function lessonHtml(l) {
+    return `<div class="lesson">
+      <div class="l-head">Lesson ${l.n}: ${esc(l.what)}</div>
+      <div class="l-row"><b>Impact:</b> ${esc(l.impact)}</div>
+      <div class="l-row l-ctrl"><b>Control:</b> ${esc(l.control)}</div>
+    </div>`;
+  }
 
   function renderList() {
-    const all = ITEMS[state.market];
-    const items = all.filter(matches);
-    $('resultCount').textContent = `Showing ${items.length} of ${all.length} tasks`;
+    const all = unitsFor(state.market, view());
+    const units = all.filter(matches);
+    $('resultCount').textContent = `Showing ${units.length} of ${all.length} tasks for ${productById[view()].name}`;
     $('navTitle').textContent = { section: 'Workstreams', timeline: 'Timeline', owner: 'Owners' }[state.groupBy];
-    if (!items.length) {
+    if (!units.length) {
       $('sections').innerHTML = '<div class="empty-state">No tasks match these filters.</div>';
       $('groupNav').innerHTML = '';
       return;
     }
-    const keys = orderedGroups(items);
+    const keys = orderedGroups(units);
     const allKeys = orderedGroups(all);
     $('groupNav').innerHTML = allKeys.map(key => {
-      const members = all.filter(it => groupKeyOf(it) === key);
-      const done = members.filter(it => isComplete(it.id)).length;
-      const blocked = members.filter(it => statusOf(it.id) === 'blocked').length;
+      const members = all.filter(u => groupKeyOf(u.item) === key);
+      const done = members.filter(u => isComplete(u.key)).length;
+      const blocked = members.filter(u => statusOf(u.key) === 'blocked').length;
       const lbl = groupLabel(key);
       const idx = keys.indexOf(key);
       return `<button type="button" class="group-link${blocked ? ' has-blocked' : ''}" data-goto="${idx}" ${idx < 0 ? 'disabled' : ''}>
@@ -439,10 +555,10 @@
     }).join('');
 
     $('sections').innerHTML = keys.map((key, idx) => {
-      const members = all.filter(it => groupKeyOf(it) === key);
-      const shown = items.filter(it => groupKeyOf(it) === key);
-      const done = members.filter(it => isComplete(it.id)).length;
-      const blocked = members.filter(it => statusOf(it.id) === 'blocked').length;
+      const members = all.filter(u => groupKeyOf(u.item) === key);
+      const shown = units.filter(u => groupKeyOf(u.item) === key);
+      const done = members.filter(u => isComplete(u.key)).length;
+      const blocked = members.filter(u => statusOf(u.key) === 'blocked').length;
       const ckey = `${state.market}::${state.groupBy}::${key}`;
       const collapsed = state.collapsed.has(ckey);
       const lbl = groupLabel(key);
@@ -461,27 +577,133 @@
     }).join('');
   }
 
+  // ---------- Overview: all products ----------
+
+  function productMeta(p) {
+    return [p.flavour, p.format, p.size].filter(Boolean).join(' · ');
+  }
+
+  function renderOverview() {
+    const products = PRODUCTS[state.market];
+    const launchUnits = unitsFor(state.market, 'all').filter(u => u.item.scope === 'L');
+    const ls = summaryOf(launchUnits);
+    const card = p => {
+      const s = summaryOf(unitsFor(state.market, p.id));
+      const ng = nextGate(state.market, p.id);
+      return `<article class="p-card" data-product-card="${p.id}">
+        <div class="p-card-top">
+          <div class="p-ring">${ringSvg(s.total ? s.done / s.total : 0)}<span>${s.pct}%</span></div>
+          <div>
+            <div class="p-name">${esc(p.name)}</div>
+            <div class="p-meta">${esc(productMeta(p) || 'No details yet')}</div>
+          </div>
+        </div>
+        <div class="p-stats">
+          <div class="p-stat"><b>${s.blockingOpen}</b><span>Blocking open</span></div>
+          <div class="p-stat${s.blocked ? ' bad' : ''}"><b>${s.blocked}</b><span>Blocked</span></div>
+          <div class="p-stat"><b>${s.done}/${s.total}</b><span>Complete</span></div>
+        </div>
+        <div class="p-gate">${ng ? `Next: Gate ${ng.g.n} ${esc(ng.g.name)} · <span class="mono">${ng.gs.done}/${ng.gs.total}</span>${ng.gs.state === 'risk' ? ' <span class="gate-pill risk">At risk</span>' : ''}` : '<span class="gate-pill pass">All gates passed</span>'}</div>
+        <div class="p-actions">
+          <button type="button" class="btn btn-sm btn-primary" data-view="${p.id}">Open tasks</button>
+          <button type="button" class="btn btn-sm" data-edit-product="${p.id}">Edit</button>
+        </div>
+      </article>`;
+    };
+
+    const perProduct = ITEMS[state.market].filter(it => it.scope === 'P');
+    let rowsHtml = '';
+    let lastSection = null;
+    let shownCount = 0;
+    for (const it of perProduct) {
+      const keys = products.map(p => `${it.id}:${p.id}`);
+      if (state.matrixOpenOnly && keys.every(isComplete)) continue;
+      if (it.section !== lastSection) {
+        lastSection = it.section;
+        rowsHtml += `<tr class="sec-row"><td colspan="${products.length + 1}">${esc(it.section)}</td></tr>`;
+      }
+      shownCount++;
+      rowsHtml += `<tr data-matrix-row="${it.id}">
+        <td class="t-cell">
+          <div class="t-title">${esc(it.title)}</div>
+          <div class="t-sub"><span class="mono">${it.id}</span><span>${esc(it.owner)}</span><span class="mono">${esc(it.when)}</span>${it.blocking ? `<span class="pill blocking">${ICON.lock}Blocking</span>` : ''}</div>
+        </td>
+        ${products.map(p => {
+          const k = `${it.id}:${p.id}`;
+          const s = statusOf(k);
+          return `<td class="cell"><button type="button" class="cell-btn st-${s}" data-open="${k}" aria-label="${esc(p.name)}: ${STATUSES[s].label}"><span class="st-dot"></span>${STATUSES[s].short}</button></td>`;
+        }).join('')}
+      </tr>`;
+    }
+
+    $('overview').innerHTML = `
+      <div class="ov-head">
+        <div>
+          <h2>${MARKET_TITLES[state.market]} · ${products.length} product${products.length === 1 ? '' : 's'}</h2>
+          <p>Per-product tasks are tracked separately for each product. Once-per-launch tasks share one status.</p>
+        </div>
+        <button type="button" class="btn btn-primary" data-add-product>${ICON.box}<span>Add product</span></button>
+      </div>
+      <div class="product-cards">
+        ${products.map(card).join('')}
+        <article class="p-card launch-wide" data-product-card="launch">
+          <div class="p-card-top">
+            <div class="p-ring">${ringSvg(ls.total ? ls.done / ls.total : 0)}<span>${ls.pct}%</span></div>
+            <div>
+              <div class="p-name">Launch-wide tasks</div>
+              <div class="p-meta">Shared by every product: channel, kickoff, compliance sign-off, go/no-go…</div>
+            </div>
+          </div>
+          <div class="p-stats">
+            <div class="p-stat"><b>${ls.blockingOpen}</b><span>Blocking open</span></div>
+            <div class="p-stat${ls.blocked ? ' bad' : ''}"><b>${ls.blocked}</b><span>Blocked</span></div>
+            <div class="p-stat"><b>${ls.done}/${ls.total}</b><span>Complete</span></div>
+          </div>
+          <div class="p-gate">They appear in every product's task list with a "Launch-wide" tag.</div>
+        </article>
+      </div>
+      <section class="matrix-card">
+        <div class="matrix-head">
+          <div>
+            <h3>Compare products</h3>
+            <p>Status of each per-product task across products. Click a status to open that task for that product.</p>
+          </div>
+          <div class="segmented" role="group" aria-label="Rows">
+            <button type="button" data-matrix="open" class="${state.matrixOpenOnly ? 'active' : ''}">Not done everywhere</button>
+            <button type="button" data-matrix="all" class="${state.matrixOpenOnly ? '' : 'active'}">All tasks</button>
+          </div>
+        </div>
+        <div class="matrix-scroll">
+          ${shownCount ? `<table class="matrix">
+            <thead><tr><th>Task</th>${products.map(p => `<th class="p-col"><button type="button" data-view="${p.id}">${esc(p.flavour || p.name)}</button></th>`).join('')}</tr></thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>` : '<div class="empty-inline">Every per-product task is done for every product.</div>'}
+        </div>
+      </section>`;
+  }
+
   // ---------- Task panel (item-level view) ----------
 
-  function panelNoteHint(id) {
-    const s = statusOf(id);
-    if (s === 'na' && !noteOf(id).trim()) return { cls: 'warn', text: 'N/A only counts as done once a reason is written here.' };
+  function panelNoteHint(key) {
+    const s = statusOf(key);
+    if (s === 'na' && !noteOf(key).trim()) return { cls: 'warn', text: 'N/A only counts as done once a reason is written here.' };
     if (s === 'na') return { cls: '', text: 'This reason is shown to everyone viewing the dashboard.' };
     if (s === 'blocked') return { cls: 'warn', text: 'Say what is needed and which role has to act. This shows in the outstanding-items post.' };
     return { cls: '', text: 'Notes are visible to everyone viewing this dashboard.' };
   }
 
   function renderPanel() {
-    const it = state.panelId && itemById[state.panelId];
-    if (!it) return;
-    const status = statusOf(it.id);
-    const note = noteOf(it.id);
-    const rec = state.records[it.id];
-    const gates = gatesFor(it.id);
+    const u = state.panelKey && parseKey(state.panelKey);
+    if (!u) return;
+    const { item: it, product, key } = u;
+    const status = statusOf(key);
+    const note = noteOf(key);
+    const rec = state.records[key];
+    const gates = gatesForItem(it);
     const lessons = lessonsById[it.id] || [];
-    const hint = panelNoteHint(it.id);
-    const order = visibleOrder();
-    const pos = order.findIndex(x => x.id === it.id);
+    const hint = panelNoteHint(key);
+    const order = visibleUnits();
+    const pos = order.findIndex(x => x.key === key);
     $('panelPrev').disabled = pos <= 0;
     $('panelNext').disabled = pos < 0 || pos >= order.length - 1;
     $('panelPos').textContent = pos >= 0 ? `${pos + 1} of ${order.length}` : '';
@@ -496,9 +718,18 @@
         </div>
       </div>` : '';
 
+    const others = it.scope === 'P' ? PRODUCTS[it.market].map(p => {
+      const k = `${it.id}:${p.id}`;
+      const s = statusOf(k);
+      return `<button type="button" class="other-product${k === key ? ' current' : ''}" data-open="${k}">
+        <span>${esc(p.name)}</span><span class="cell-btn st-${s}"><span class="st-dot"></span>${STATUSES[s].label}</span>
+      </button>`;
+    }).join('') : '';
+
     $('panelBody').innerHTML = `
       <div class="tp-chips">
         <span class="tp-market ${it.market}">${MARKET_LONG[it.market]}</span>
+        ${product ? `<span class="tp-product">${ICON.box} ${esc(product.name)}</span>` : `<span class="pill launch-wide">${ICON.users}Launch-wide</span>`}
         <span class="task-id mono"><span class="src-dot src-${it.source}"></span> ${it.id}</span>
         ${it.blocking ? `<span class="pill blocking">${ICON.lock}Blocking</span>` : ''}
         ${it.custom ? '<span class="pill added">Added</span>' : ''}
@@ -506,9 +737,10 @@
       </div>
       <h2 class="tp-title" id="tpTitle">${esc(it.title)}</h2>
       ${it.detail ? `<p class="tp-detail">${esc(it.detail)}</p>` : ''}
+      ${product ? '' : '<p class="tp-shared">This task is done once for the whole launch. Its status is shared by every product.</p>'}
 
       <div class="tp-section">
-        <span class="tp-label">Status</span>
+        <span class="tp-label">Status${product ? ` for ${esc(product.name)}` : ''}</span>
         <div class="status-choices" role="group" aria-label="Status">
           ${Object.entries(STATUSES).map(([v, m]) => `<button type="button" class="status-choice st-${v}" data-panel-status="${v}" aria-pressed="${v === status}"><span class="st-dot"></span>${m.label}</button>`).join('')}
         </div>
@@ -519,6 +751,11 @@
         <textarea class="tp-note" id="tpNote" maxlength="1000" placeholder="${status === 'na' ? 'Why this does not apply to this launch' : status === 'blocked' ? 'What is blocking this, and which role needs to act?' : 'Progress, decisions, links…'}">${esc(note)}</textarea>
         <p class="tp-note-hint ${hint.cls}" id="tpNoteHint">${hint.text}</p>
       </div>
+
+      ${others ? `<div class="tp-section">
+        <span class="tp-label">This task in each product</span>
+        <div class="other-products">${others}</div>
+      </div>` : ''}
 
       <div class="tp-section">
         <span class="tp-label">Details</span>
@@ -538,11 +775,7 @@
 
       ${lessons.length ? `<div class="tp-section">
         <span class="tp-label">Why this step exists</span>
-        ${lessons.map(l => `<div class="lesson">
-          <div class="l-head">Lesson ${l.n}: ${esc(l.what)}</div>
-          <div class="l-row"><b>Impact:</b> ${esc(l.impact)}</div>
-          <div class="l-row l-ctrl"><b>Control:</b> ${esc(l.control)}</div>
-        </div>`).join('')}
+        ${lessons.map(lessonHtml).join('')}
       </div>` : ''}
 
       <div class="tp-footer">
@@ -561,41 +794,45 @@
       </div>`;
   }
 
-  function openPanel(id, { focus = true } = {}) {
-    if (!itemById[id]) return;
+  function markSelectedRow() {
+    document.querySelectorAll('.task.selected').forEach(el => el.classList.remove('selected'));
+    const row = state.panelKey && $('row-' + state.panelKey);
+    if (row) row.classList.add('selected');
+  }
+  function openPanel(key, { focus = true } = {}) {
+    const u = parseKey(key);
+    if (!u) return;
     closeMenu();
-    state.panelId = id;
+    state.panelKey = u.key;
     state.confirmRemove = false;
     renderPanel();
     $('taskPanel').classList.add('open');
     $('taskPanel').setAttribute('aria-hidden', 'false');
     $('panelBackdrop').classList.add('open');
-    document.querySelectorAll('.task.selected').forEach(el => el.classList.remove('selected'));
-    const row = $('row-' + id);
-    if (row) row.classList.add('selected');
-    if (location.hash !== '#' + id) history.replaceState(null, '', '#' + id);
+    markSelectedRow();
+    if (location.hash !== '#' + u.key) history.replaceState(null, '', '#' + u.key);
     if (focus) $('panelClose').focus();
   }
   function closePanel() {
-    if (!state.panelId) return;
-    const id = state.panelId;
-    state.panelId = null;
+    if (!state.panelKey) return;
+    const key = state.panelKey;
+    state.panelKey = null;
     state.confirmRemove = false;
     $('taskPanel').classList.remove('open');
     $('taskPanel').setAttribute('aria-hidden', 'true');
     $('panelBackdrop').classList.remove('open');
-    document.querySelectorAll('.task.selected').forEach(el => el.classList.remove('selected'));
+    markSelectedRow();
     if (location.hash) history.replaceState(null, '', location.pathname + location.search);
-    const opener = document.querySelector(`[data-open="${id}"]`);
+    const opener = document.querySelector(`[data-open="${key}"]`);
     if (opener) opener.focus({ preventScroll: true });
   }
   function stepPanel(delta) {
-    const order = visibleOrder();
-    const pos = order.findIndex(x => x.id === state.panelId);
+    const order = visibleUnits();
+    const pos = order.findIndex(x => x.key === state.panelKey);
     const next = order[pos + delta];
     if (!next) return;
-    openPanel(next.id, { focus: false });
-    const row = $('row-' + next.id);
+    openPanel(next.key, { focus: false });
+    const row = $('row-' + next.key);
     if (row) row.scrollIntoView({ block: 'nearest' });
   }
 
@@ -604,6 +841,10 @@
   function fillSectionOptions(selected) {
     const sections = sectionsFor($('fMarket').value, $('fPhase').value);
     $('fSection').innerHTML = sections.map(s => `<option value="${esc(s)}"${s === selected ? ' selected' : ''}>${esc(s)}</option>`).join('');
+  }
+  function setFieldError(field, ok) {
+    $(field + 'Error').hidden = ok;
+    $(field).closest('.field').classList.toggle('invalid', !ok);
   }
   function openForm(editId) {
     const it = editId ? itemById[editId] : null;
@@ -624,7 +865,7 @@
     $('fSource').value = it ? it.source : 'ADD';
     $('fBlocking').checked = it ? it.blocking : false;
     $('fLink').value = it ? it.link : '';
-    ['fTitle', 'fWhen', 'fLink'].forEach(f => { $(f + 'Error').hidden = true; $(f).closest('.field').classList.remove('invalid'); });
+    ['fTitle', 'fWhen', 'fLink'].forEach(f => setFieldError(f, true));
     $('taskFormModal').hidden = false;
     $('fTitle').focus();
   }
@@ -640,8 +881,7 @@
     ];
     let firstBad = null;
     for (const [f, ok] of checks) {
-      $(f + 'Error').hidden = ok;
-      $(f).closest('.field').classList.toggle('invalid', !ok);
+      setFieldError(f, ok);
       if (!ok && !firstBad) firstBad = f;
     }
     if (firstBad) $(firstBad).focus();
@@ -654,7 +894,7 @@
     const market = existing ? state.editingId.slice(0, 2) : $('fMarket').value;
     const item = {
       ...(existing || {}),
-      id: state.editingId || randomId(market),
+      id: state.editingId || `${market}-NEW-${randomChars(6)}`,
       market,
       phase: $('fPhase').value,
       section: $('fSection').value,
@@ -670,34 +910,107 @@
       updatedAt: new Date().toISOString(),
     };
     const isNew = !state.editingId;
+    const keepKey = state.panelKey;
     closeForm();
-    const ok = await saveItem(item, isNew ? 'Task added' : 'Task updated');
+    const ok = await saveDoc('customRaw', 'saveItem', item, isNew ? 'Task added' : 'Task updated');
     if (!ok) return;
-    if (isNew) {
-      resetFilters();
-      if (state.market !== market) setMarket(market); else renderAll();
+    let key = keepKey && parseKey(keepKey) && parseKey(keepKey).item.id === item.id ? keepKey : null;
+    if (!key) {
+      const pid = state.view[market] !== 'all' ? state.view[market] : (PRODUCTS[market][0] || {}).id;
+      key = unitKey(itemById[item.id], pid);
     }
-    openPanel(item.id);
-    const row = $('row-' + item.id);
+    if (isNew) revealKey(key);
+    openPanel(key);
+    const row = $('row-' + key);
     if (row) {
       row.scrollIntoView({ block: 'center' });
       row.classList.add('highlight');
       setTimeout(() => row.classList.remove('highlight'), 2100);
     }
   }
-  async function saveItem(item, successMsg) {
-    const prev = state.customRaw[item.id];
-    state.customRaw[item.id] = item;
-    rebuildItems();
-    renderOwnerFilter();
+
+  // ---------- Add / edit product form ----------
+
+  function openProductForm(pid) {
+    const p = pid ? productById[pid] : null;
+    state.editingProductId = p ? p.id : null;
+    $('productFormTitle').textContent = p ? 'Edit product' : 'Add a product';
+    $('productFormSubmit').textContent = p ? 'Save changes' : 'Add product';
+    $('pMarket').value = p ? p.market : state.market;
+    $('pMarket').disabled = !!p;
+    $('pName').value = p ? p.name : '';
+    $('pFlavour').value = p ? p.flavour : '';
+    $('pFormat').value = p ? p.format : '';
+    $('pSize').value = p ? p.size : '';
+    $('pAsin').value = p ? p.asin : '';
+    $('pSku').value = p ? p.sku : '';
+    $('pNotes').value = p ? p.notes : '';
+    $('productRemoveBtn').hidden = !p || PRODUCTS[p.market].length < 2;
+    $('productRemoveConfirm').hidden = true;
+    setFieldError('pName', true);
+    setFieldError('pAsin', true);
+    $('productFormModal').hidden = false;
+    $('pName').focus();
+  }
+  function closeProductForm() {
+    $('productFormModal').hidden = true;
+    state.editingProductId = null;
+  }
+  async function submitProductForm(e) {
+    e.preventDefault();
+    const asin = $('pAsin').value.trim().toUpperCase();
+    const nameOk = $('pName').value.trim().length > 0;
+    const asinOk = !asin || /^[A-Z0-9]{10}$/.test(asin);
+    setFieldError('pName', nameOk);
+    setFieldError('pAsin', asinOk);
+    if (!nameOk) { $('pName').focus(); return; }
+    if (!asinOk) { $('pAsin').focus(); return; }
+    const existing = state.editingProductId ? state.productRaw[state.editingProductId] : null;
+    const market = existing ? existing.market : $('pMarket').value;
+    const product = {
+      ...(existing || {}),
+      id: state.editingProductId || randomChars(6),
+      market,
+      name: $('pName').value.trim(),
+      flavour: $('pFlavour').value.trim(),
+      format: $('pFormat').value.trim(),
+      size: $('pSize').value.trim(),
+      asin,
+      sku: $('pSku').value.trim(),
+      notes: $('pNotes').value.trim(),
+      order: existing ? existing.order : Math.max(0, ...PRODUCTS[market].map(p => p.order)) + 1,
+      createdAt: (existing && existing.createdAt) || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const isNew = !existing;
+    closeProductForm();
+    const ok = await saveDoc('productRaw', 'saveProduct', product, isNew ? 'Product added' : 'Product updated');
+    if (ok && isNew) {
+      if (state.market !== market) setMarket(market);
+      setView(product.id);
+    }
+  }
+  async function removeProduct(pid) {
+    const raw = state.productRaw[pid];
+    if (!raw) return;
+    if (PRODUCTS[raw.market].length < 2) { toast('A marketplace needs at least one product.'); return; }
+    closeProductForm();
+    await saveDoc('productRaw', 'saveProduct', { ...raw, removed: true, removedAt: new Date().toISOString() }, 'Product removed');
+  }
+
+  // Optimistic save for added tasks and products, undone if the store rejects it.
+  async function saveDoc(bucket, method, doc, successMsg) {
+    const prev = state[bucket][doc.id];
+    state[bucket][doc.id] = doc;
+    rebuildAll();
     renderAll();
     try {
-      await store.saveItem(item);
+      await store[method](doc);
       toast(successMsg);
       return true;
     } catch (e) {
-      if (prev) state.customRaw[item.id] = prev; else delete state.customRaw[item.id];
-      rebuildItems();
+      if (prev) state[bucket][doc.id] = prev; else delete state[bucket][doc.id];
+      rebuildAll();
       renderAll();
       toast(`Not saved: ${e.message}`);
       return false;
@@ -707,7 +1020,11 @@
     const raw = state.customRaw[id];
     if (!raw) return;
     closePanel();
-    await saveItem({ ...raw, removed: true, removedAt: new Date().toISOString() }, 'Task removed');
+    await saveDoc('customRaw', 'saveItem', { ...raw, removed: true, removedAt: new Date().toISOString() }, 'Task removed');
+  }
+  function rebuildAll() {
+    rebuildItems();
+    rebuildProducts();
     renderOwnerFilter();
   }
 
@@ -716,17 +1033,23 @@
   function renderAll() {
     closeMenu();
     const active = document.activeElement;
+    const overview = view() === 'all';
+    renderProductBar();
     renderGates();
     renderSummary();
-    if (state.panelId && !itemById[state.panelId]) closePanel();
-    if (state.panelId && !(active && active.id === 'tpNote')) renderPanel();
+    $('overview').hidden = !overview;
+    $('productView').hidden = overview;
+    document.querySelector('.nav-card').hidden = overview;
+    if (state.panelKey && !parseKey(state.panelKey)) closePanel();
+    if (state.panelKey && !(active && active.id === 'tpNote')) renderPanel();
     if (active && active.classList && active.classList.contains('note-input')) {
       pendingRender = true;
       return;
     }
     pendingRender = false;
     const y = window.scrollY;
-    renderList();
+    if (overview) renderOverview(); else renderList();
+    markSelectedRow();
     window.scrollTo(0, y);
   }
 
@@ -744,43 +1067,43 @@
     $('connText').textContent = label;
   }
 
-  async function saveRecord(id, patch) {
-    const it = itemById[id];
-    if (!it) return;
-    const prev = state.records[id];
+  async function saveRecord(key, patch) {
+    const u = parseKey(key);
+    if (!u) return;
+    const prev = state.records[key];
     const record = {
-      item_id: id,
-      market: it.market,
-      status: statusOf(id),
-      note: noteOf(id),
+      item_id: key,
+      market: u.item.market,
+      status: statusOf(key),
+      note: noteOf(key),
       ...patch,
       updated_at: new Date().toISOString(),
     };
-    state.records[id] = record;
+    state.records[key] = record;
     renderAll();
     try {
       await store.save(record);
     } catch (e) {
-      if (prev) state.records[id] = prev; else delete state.records[id];
+      if (prev) state.records[key] = prev; else delete state.records[key];
       renderAll();
       toast(`Not saved: ${e.message}`);
     }
   }
 
-  function setStatus(id, status, { focusNote = true } = {}) {
-    saveRecord(id, { status });
+  function setStatus(key, status, { focusNote = true } = {}) {
+    saveRecord(key, { status });
     if (focusNote && (status === 'blocked' || status === 'na')) {
       requestAnimationFrame(() => {
-        const input = state.panelId === id ? $('tpNote') : document.querySelector(`#row-${id} .note-input`);
+        const input = state.panelKey === key ? $('tpNote') : document.querySelector(`.note-input[data-key="${key}"]`);
         if (input && !input.value) input.focus();
       });
     }
   }
 
   function openMenu(btn) {
-    const id = btn.dataset.menu;
-    if (menuFor === id) { closeMenu(); return; }
-    const current = statusOf(id);
+    const key = btn.dataset.menu;
+    if (menuFor === key) { closeMenu(); return; }
+    const current = statusOf(key);
     const menu = $('statusMenu');
     menu.innerHTML = Object.entries(STATUSES).map(([v, m]) =>
       `<button type="button" role="menuitemradio" aria-checked="${v === current}" data-set-status="${v}"><span class="st-dot st-${v}"></span>${m.label}</button>`).join('');
@@ -794,7 +1117,7 @@
     if (r.bottom + mh + 12 > window.innerHeight) top = r.top - mh - 6 + window.scrollY;
     menu.style.left = left + 'px';
     menu.style.top = top + 'px';
-    menuFor = id;
+    menuFor = key;
     btn.setAttribute('aria-expanded', 'true');
     const checked = menu.querySelector('[aria-checked="true"]');
     if (checked) checked.focus();
@@ -809,31 +1132,34 @@
   }
 
   function outstandingText() {
-    const open = ITEMS[state.market].filter(it => matches(it) && !isComplete(it.id));
+    const v = view();
+    const units = v === 'all' ? unitsFor(state.market, 'all') : visibleUnits();
+    const open = units.filter(u => !isComplete(u.key));
     const today = new Date().toISOString().slice(0, 10);
-    const next = GATES.map(g => ({ g, s: gateState(g, state.market) })).find(x => x.s.state !== 'pass');
-    const lines = [`⏳ OUTSTANDING — ${MARKET_NAMES[state.market]} — Product A — as of ${today}`];
-    if (next) {
-      const verdict = next.s.state === 'risk' ? 'blocked' : 'at risk';
-      lines.push(`Next gate: Gate ${next.g.n} ${next.g.name} (${next.g.when}) — ${verdict}, ${next.s.done}/${next.s.total} ready`);
+    const scopeLabel = v === 'all' ? `all ${PRODUCTS[state.market].length} products` : productById[v].name;
+    const ng = nextGate(state.market, v);
+    const lines = [`⏳ OUTSTANDING — ${MARKET_NAMES[state.market]} — ${scopeLabel} — as of ${today}`];
+    if (ng) {
+      lines.push(`Next gate: Gate ${ng.g.n} ${ng.g.name} (${ng.g.when}) — ${ng.gs.state === 'risk' ? 'blocked' : 'at risk'}, ${ng.gs.done}/${ng.gs.total} ready`);
     } else {
       lines.push('All four gates passed.');
     }
-    const line = it => {
-      const s = statusOf(it.id);
-      const note = noteOf(it.id).trim();
-      let out = `${STATUSES[s].icon} ${it.id} ${it.task} — ${it.owner} — ${it.when}`;
+    const line = u => {
+      const s = statusOf(u.key);
+      const note = noteOf(u.key).trim();
+      const who = u.product ? (v === 'all' ? ` [${u.product.name}]` : '') : ' [launch-wide]';
+      let out = `${STATUSES[s].icon} ${u.item.id} ${u.item.task}${who} — ${u.item.owner} — ${u.item.when}`;
       if (s === 'blocked' && note) out += ` — blocker: ${note}`;
       if (s === 'na') out += ' — N/A reason missing';
       return out;
     };
-    const blocking = open.filter(it => it.blocking);
-    const other = open.filter(it => !it.blocking);
+    const blocking = open.filter(u => u.item.blocking);
+    const other = open.filter(u => !u.item.blocking);
     lines.push('', 'BLOCKING');
     lines.push(...(blocking.length ? blocking.map(line) : ['None']));
     lines.push('', 'NON-BLOCKING');
     lines.push(...(other.length ? other.map(line) : ['None']));
-    const verify = open.filter(it => it.source === 'VERIFY').map(it => it.id);
+    const verify = [...new Set(open.filter(u => u.item.source === 'VERIFY').map(u => u.item.id))];
     lines.push('', `Decisions needed (VERIFY): ${verify.length ? verify.join(', ') : 'none'}`);
     return lines.join('\n');
   }
@@ -857,8 +1183,8 @@
     }
   }
   async function copyPanelLink() {
-    if (!state.panelId) return;
-    const url = location.origin + location.pathname + '#' + state.panelId;
+    if (!state.panelKey) return;
+    const url = location.origin + location.pathname + '#' + state.panelKey;
     if (!(await copyText(url, 'Link to this task copied'))) toast(url);
   }
 
@@ -901,9 +1227,18 @@
   function setMarket(market) {
     state.market = market;
     document.querySelectorAll('.market-tab').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.market === market)));
-    if (state.panelId && itemById[state.panelId] && itemById[state.panelId].market !== market) closePanel();
+    const u = state.panelKey && parseKey(state.panelKey);
+    if (u && u.item.market !== market) closePanel();
     renderOwnerFilter();
     renderAll();
+  }
+  function setView(v) {
+    state.view[state.market] = v;
+    writeLocal('gate-board:view:v1', state.view);
+    const u = state.panelKey && parseKey(state.panelKey);
+    if (u && u.product && v !== 'all' && u.product.id !== v) closePanel();
+    renderAll();
+    window.scrollTo(0, 0);
   }
 
   function setPhase(phase) {
@@ -920,19 +1255,32 @@
     $('searchInput').value = '';
   }
 
-  function revealItem(id) {
-    const it = itemById[id];
-    if (!it) return false;
+  // Makes the row for a unit visible: right market, a product view that contains it, filters cleared.
+  function revealKey(key) {
+    const u = parseKey(key);
+    if (!u) return false;
     resetFilters();
-    state.collapsed.delete(`${it.market}::${state.groupBy}::${groupKeyOf(it)}`);
-    if (state.market !== it.market) setMarket(it.market); else renderAll();
+    state.collapsed.delete(`${u.item.market}::${state.groupBy}::${groupKeyOf(u.item)}`);
+    if (state.market !== u.item.market) {
+      state.market = u.item.market;
+      document.querySelectorAll('.market-tab').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.market === state.market)));
+      renderOwnerFilter();
+    }
+    const target = u.product ? u.product.id : (view() === 'all' ? (PRODUCTS[state.market][0] || {}).id : view());
+    state.view[state.market] = target || 'all';
+    writeLocal('gate-board:view:v1', state.view);
+    renderAll();
     return true;
   }
 
   function jumpTo(id) {
     closeDrawer();
-    if (!revealItem(id)) return;
-    const row = $('row-' + id);
+    const item = itemById[id];
+    if (!item) return;
+    const pid = view() !== 'all' && item.market === state.market ? view() : (PRODUCTS[item.market][0] || {}).id;
+    const key = unitKey(item, pid);
+    if (!revealKey(key)) return;
+    const row = $('row-' + key);
     if (row) {
       row.scrollIntoView({ block: 'center' });
       row.classList.add('highlight');
@@ -941,12 +1289,14 @@
   }
 
   function openFromHash() {
-    const id = decodeURIComponent(location.hash.slice(1));
-    if (!id || id === state.panelId) return;
-    if (!itemById[id]) return;
-    revealItem(id);
-    openPanel(id, { focus: false });
-    const row = $('row-' + id);
+    let key = decodeURIComponent(location.hash.slice(1));
+    if (!key || key === state.panelKey) return;
+    const item = itemById[key.split(':')[0]];
+    if (item && item.scope === 'P' && !key.includes(':')) key = unitKey(item, (PRODUCTS[item.market][0] || {}).id);
+    if (!parseKey(key)) return;
+    revealKey(key);
+    openPanel(key, { focus: false });
+    const row = $('row-' + key);
     if (row) row.scrollIntoView({ block: 'center' });
   }
 
@@ -966,8 +1316,8 @@
   function bindEvents() {
     document.addEventListener('change', e => {
       const t = e.target;
-      if (t.matches('.note-input')) saveRecord(t.dataset.id, { note: t.value.trim() });
-      else if (t.id === 'tpNote' && state.panelId) saveRecord(state.panelId, { note: t.value.trim() });
+      if (t.matches('.note-input')) saveRecord(t.dataset.key, { note: t.value.trim() });
+      else if (t.id === 'tpNote' && state.panelKey) saveRecord(state.panelKey, { note: t.value.trim() });
     });
     document.addEventListener('focusout', e => {
       if (e.target.matches && e.target.matches('.note-input') && pendingRender) setTimeout(renderAll, 0);
@@ -978,8 +1328,9 @@
       if (e.key === 'Escape') {
         if (!$('statusMenu').hidden) { closeMenu(); return; }
         if (!$('taskFormModal').hidden) { closeForm(); return; }
+        if (!$('productFormModal').hidden) { closeProductForm(); return; }
         if (!$('copyModal').hidden) { $('copyModal').hidden = true; return; }
-        if (state.panelId) { closePanel(); return; }
+        if (state.panelKey) { closePanel(); return; }
         closeDrawer();
       }
       if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !$('statusMenu').hidden) {
@@ -992,20 +1343,27 @@
     });
     document.addEventListener('click', e => {
       const opt = e.target.closest('[data-set-status]');
-      if (opt) { const id = menuFor; closeMenu(); setStatus(id, opt.dataset.setStatus); return; }
+      if (opt) { const key = menuFor; closeMenu(); setStatus(key, opt.dataset.setStatus); return; }
       const menuBtn = e.target.closest('[data-menu]');
       if (menuBtn) { openMenu(menuBtn); return; }
       if (!e.target.closest('#statusMenu')) closeMenu();
 
       const panelStatus = e.target.closest('[data-panel-status]');
-      if (panelStatus && state.panelId) { setStatus(state.panelId, panelStatus.dataset.panelStatus); return; }
-      if (e.target.closest('[data-edit-task]')) { openForm(state.panelId); return; }
+      if (panelStatus && state.panelKey) { setStatus(state.panelKey, panelStatus.dataset.panelStatus); return; }
+      if (e.target.closest('[data-edit-task]')) { openForm(e.target.closest('[data-edit-task]').dataset.editTask); return; }
       if (e.target.closest('[data-remove-task]')) { state.confirmRemove = true; renderPanel(); return; }
       if (e.target.closest('[data-remove-cancel]')) { state.confirmRemove = false; renderPanel(); return; }
-      if (e.target.closest('[data-remove-confirm]')) { removeItem(state.panelId); return; }
+      if (e.target.closest('[data-remove-confirm]')) { removeItem(parseKey(state.panelKey).item.id); return; }
+      if (e.target.closest('[data-add-product]')) { openProductForm(null); return; }
+      const editProduct = e.target.closest('[data-edit-product]');
+      if (editProduct) { openProductForm(editProduct.dataset.editProduct); return; }
+      const viewBtn = e.target.closest('[data-view]');
+      if (viewBtn) { setView(viewBtn.dataset.view); return; }
+      const matrixBtn = e.target.closest('[data-matrix]');
+      if (matrixBtn) { state.matrixOpenOnly = matrixBtn.dataset.matrix === 'open'; renderAll(); return; }
 
       const check = e.target.closest('[data-check]');
-      if (check) { const id = check.dataset.check; setStatus(id, statusOf(id) === 'done' ? 'not_started' : 'done', { focusNote: false }); return; }
+      if (check) { const key = check.dataset.check; setStatus(key, statusOf(key) === 'done' ? 'not_started' : 'done', { focusNote: false }); return; }
       const opener = e.target.closest('[data-open]');
       if (opener) { openPanel(opener.dataset.open); return; }
       const col = e.target.closest('[data-collapse]');
@@ -1018,8 +1376,8 @@
       }
       const lesson = e.target.closest('[data-lesson]');
       if (lesson) {
-        const id = lesson.dataset.lesson;
-        if (state.openLessons.has(id)) state.openLessons.delete(id); else state.openLessons.add(id);
+        const key = lesson.dataset.lesson;
+        if (state.openLessons.has(key)) state.openLessons.delete(key); else state.openLessons.add(key);
         renderAll();
         return;
       }
@@ -1042,7 +1400,7 @@
 
       // Clicking anywhere else on a task row opens its detail panel.
       const row = e.target.closest('.task');
-      if (row && !e.target.closest('button, input, textarea, select, a')) openPanel(row.dataset.id);
+      if (row && !e.target.closest('button, input, textarea, select, a')) openPanel(row.dataset.key);
     });
     window.addEventListener('resize', closeMenu);
     window.addEventListener('hashchange', openFromHash);
@@ -1067,6 +1425,13 @@
     $('taskForm').addEventListener('submit', submitForm);
     $('fMarket').addEventListener('change', () => fillSectionOptions(null));
     $('fPhase').addEventListener('change', () => fillSectionOptions(null));
+    $('addProductBtn').addEventListener('click', () => openProductForm(null));
+    $('productFormClose').addEventListener('click', closeProductForm);
+    $('productFormCancel').addEventListener('click', closeProductForm);
+    $('productForm').addEventListener('submit', submitProductForm);
+    $('productRemoveBtn').addEventListener('click', () => { $('productRemoveConfirm').hidden = false; });
+    $('productRemoveCancel').addEventListener('click', () => { $('productRemoveConfirm').hidden = true; });
+    $('productRemoveConfirmBtn').addEventListener('click', () => removeProduct(state.editingProductId));
   }
 
   async function loadWithRetry() {
@@ -1074,8 +1439,8 @@
       const data = await store.load();
       state.records = data.records;
       for (const [id, raw] of Object.entries(data.items)) state.customRaw[id] = raw;
-      rebuildItems();
-      renderOwnerFilter();
+      for (const [id, raw] of Object.entries(data.products)) state.productRaw[id] = raw;
+      rebuildAll();
       loaded = true;
       if (store.mode === 'shared') setConnection('shared', 'Shared · live');
     } catch (e) {
@@ -1086,9 +1451,8 @@
   }
 
   async function init() {
-    rebuildItems();
+    rebuildAll();
     bindEvents();
-    renderOwnerFilter();
     renderAll();
     try {
       store = window.createStore(window.GATE_BOARD_CONFIG);
@@ -1102,23 +1466,27 @@
     await loadWithRetry();
     renderAll();
     openFromHash();
-    store.subscribe(
-      records => {
+    store.subscribe({
+      records: records => {
         for (const r of records) state.records[r.item_id] = r;
         renderAll();
       },
-      items => {
+      items: items => {
         for (const raw of items) state.customRaw[raw.id] = raw;
-        rebuildItems();
-        renderOwnerFilter();
+        rebuildAll();
         renderAll();
       },
-      status => {
+      products: products => {
+        for (const raw of products) state.productRaw[raw.id] = raw;
+        rebuildAll();
+        renderAll();
+      },
+      connection: status => {
         if (!loaded) return;
         if (status === 'SUBSCRIBED') setConnection('shared', 'Shared · live');
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') setConnection('error', 'Live updates paused');
       },
-    );
+    });
   }
 
   init();

@@ -1,10 +1,8 @@
-// Storage for task statuses and added tasks: Supabase when configured (shared, live),
+// Storage for task statuses, added tasks and products: Supabase when configured (shared, live),
 // otherwise this browser's localStorage.
 (function () {
-  const STATUS_TABLE = 'launch_status';
-  const ITEMS_TABLE = 'launch_items';
-  const STATUS_KEY = 'gate-board:status:v1';
-  const ITEMS_KEY = 'gate-board:items:v1';
+  const TABLES = { records: 'launch_status', items: 'launch_items', products: 'launch_products' };
+  const KEYS = { records: 'gate-board:status:v1', items: 'gate-board:items:v1', products: 'gate-board:products:v1' };
 
   function readJson(key) {
     try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { return {}; }
@@ -15,23 +13,21 @@
   }
 
   function createLocalStore() {
-    let records = readJson(STATUS_KEY);
-    let items = readJson(ITEMS_KEY);
+    const data = { records: readJson(KEYS.records), items: readJson(KEYS.items), products: readJson(KEYS.products) };
+    const put = (kind, id, value) => { data[kind][id] = value; writeJson(KEYS[kind], data[kind]); };
     return {
       mode: 'local',
-      async load() { return { records: { ...records }, items: { ...items } }; },
-      async save(record) {
-        records[record.item_id] = record;
-        writeJson(STATUS_KEY, records);
-      },
-      async saveItem(item) {
-        items[item.id] = item;
-        writeJson(ITEMS_KEY, items);
-      },
-      subscribe(onRecords, onItems) {
+      async load() { return { records: { ...data.records }, items: { ...data.items }, products: { ...data.products } }; },
+      async save(record) { put('records', record.item_id, record); },
+      async saveItem(item) { put('items', item.id, item); },
+      async saveProduct(product) { put('products', product.id, product); },
+      subscribe(handlers) {
         window.addEventListener('storage', e => {
-          if (e.key === STATUS_KEY) { records = readJson(STATUS_KEY); onRecords(Object.values(records)); }
-          if (e.key === ITEMS_KEY) { items = readJson(ITEMS_KEY); onItems(Object.values(items)); }
+          for (const kind of Object.keys(KEYS)) {
+            if (e.key !== KEYS[kind]) continue;
+            data[kind] = readJson(KEYS[kind]);
+            handlers[kind](Object.values(data[kind]));
+          }
         });
       },
     };
@@ -39,40 +35,45 @@
 
   function createSupabaseStore(url, anonKey) {
     const client = window.supabase.createClient(url, anonKey);
+    const upsert = async (table, row, key) => {
+      const { error } = await client.from(table).upsert(row, { onConflict: key });
+      if (error) throw new Error(error.message);
+    };
+    const docRow = obj => ({ id: obj.id, market: obj.market, data: obj, updated_at: new Date().toISOString() });
     return {
       mode: 'shared',
       async load() {
-        const [s, i] = await Promise.all([
-          client.from(STATUS_TABLE).select('item_id,market,status,note,updated_at'),
-          client.from(ITEMS_TABLE).select('id,data'),
+        const [s, i, p] = await Promise.all([
+          client.from(TABLES.records).select('item_id,market,status,note,updated_at'),
+          client.from(TABLES.items).select('id,data'),
+          client.from(TABLES.products).select('id,data'),
         ]);
-        if (s.error) throw new Error(s.error.message);
-        if (i.error) throw new Error(i.error.message);
+        for (const res of [s, i, p]) if (res.error) throw new Error(res.error.message);
         const records = {};
         for (const row of s.data) records[row.item_id] = row;
         const items = {};
         for (const row of i.data) items[row.id] = { ...row.data, id: row.id };
-        return { records, items };
+        const products = {};
+        for (const row of p.data) products[row.id] = { ...row.data, id: row.id };
+        return { records, items, products };
       },
-      async save(record) {
-        const { error } = await client.from(STATUS_TABLE).upsert(record, { onConflict: 'item_id' });
-        if (error) throw new Error(error.message);
-      },
-      async saveItem(item) {
-        const row = { id: item.id, market: item.market, data: item, updated_at: new Date().toISOString() };
-        const { error } = await client.from(ITEMS_TABLE).upsert(row, { onConflict: 'id' });
-        if (error) throw new Error(error.message);
-      },
-      subscribe(onRecords, onItems, onConnection) {
+      save: record => upsert(TABLES.records, record, 'item_id'),
+      saveItem: item => upsert(TABLES.items, docRow(item), 'id'),
+      saveProduct: product => upsert(TABLES.products, docRow(product), 'id'),
+      subscribe(handlers) {
+        const doc = row => ({ ...row.data, id: row.id });
         client
           .channel('gate_board_changes')
-          .on('postgres_changes', { event: '*', schema: 'public', table: STATUS_TABLE }, payload => {
-            if (payload.new && payload.new.item_id) onRecords([payload.new]);
+          .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.records }, payload => {
+            if (payload.new && payload.new.item_id) handlers.records([payload.new]);
           })
-          .on('postgres_changes', { event: '*', schema: 'public', table: ITEMS_TABLE }, payload => {
-            if (payload.new && payload.new.id) onItems([{ ...payload.new.data, id: payload.new.id }]);
+          .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.items }, payload => {
+            if (payload.new && payload.new.id) handlers.items([doc(payload.new)]);
           })
-          .subscribe(status => onConnection && onConnection(status));
+          .on('postgres_changes', { event: '*', schema: 'public', table: TABLES.products }, payload => {
+            if (payload.new && payload.new.id) handlers.products([doc(payload.new)]);
+          })
+          .subscribe(status => handlers.connection && handlers.connection(status));
       },
     };
   }
