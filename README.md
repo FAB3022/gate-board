@@ -11,6 +11,8 @@ A launch-readiness dashboard for Nutratology supplement launches on Amazon.ca an
   - Gate 3, Go / No-Go (T-2): every pre-launch BLOCKING item must be done
   - Gate 4, Launch-Day Image Gate (T0): no PPC or BEX until the correct images are live
 - **Clear tasks:** each task shows a short title, its details, the owner role, timing, and whether it is blocking. Click the circle to mark a task done, or use the status menu for In progress, Blocked or N/A. Blocked tasks take a blocker note. N/A only counts as complete once a reason is written, because the SOP requires one.
+- **Task detail view:** click any task to open its full page, with status, notes, owner, timing, which gates it counts toward, its source, and the lesson behind it. Use the arrows to step through tasks, or **Copy link** to share a link that opens straight into that task.
+- **Add your own tasks** with **Add task**: pick the marketplace, phase, workstream, owner role, timing, source tag and whether it is blocking, and optionally link a Slack thread or doc. Added tasks count toward progress and gates, and can be edited or removed from their detail view. The example task "Assign a main image owner…" comes from a request in the June launch channel on Slack; it lives in `data/examples.js`.
 - **Summary tiles** for blocking items still open, blocked, in progress and done. Click a tile to show just those tasks.
 - **Group by** workstream, timeline (T-120 to T+30) or owner, with a sidebar to jump between groups.
 - **Filters** by phase, status, owner role, blocking only, and a text search.
@@ -25,6 +27,8 @@ Without setup, statuses are saved in each person's browser only, and the page sa
 2. In the project, open **SQL Editor**, paste the contents of [`supabase/schema.sql`](supabase/schema.sql), and click **Run**.
 3. Open **Project Settings → API** and copy the **Project URL** and the **anon public** key.
 4. Paste both into [`config.js`](config.js), then commit and push.
+
+If you set Supabase up before added tasks existed, run `schema.sql` again; it adds the `launch_items` table without touching existing data.
 
 The badge at the top changes to **Shared · live**. Changes made by anyone appear on everyone's screen without refreshing.
 

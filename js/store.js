@@ -1,24 +1,37 @@
-// Status storage: Supabase when configured (shared, live), otherwise this browser's localStorage.
+// Storage for task statuses and added tasks: Supabase when configured (shared, live),
+// otherwise this browser's localStorage.
 (function () {
-  const TABLE = 'launch_status';
-  const LOCAL_KEY = 'gate-board:status:v1';
+  const STATUS_TABLE = 'launch_status';
+  const ITEMS_TABLE = 'launch_items';
+  const STATUS_KEY = 'gate-board:status:v1';
+  const ITEMS_KEY = 'gate-board:items:v1';
+
+  function readJson(key) {
+    try { return JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { return {}; }
+  }
+  function writeJson(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); }
+    catch (e) { throw new Error('This browser blocked local storage'); }
+  }
 
   function createLocalStore() {
-    let map = {};
-    try { map = JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}'); } catch (e) { map = {}; }
+    let records = readJson(STATUS_KEY);
+    let items = readJson(ITEMS_KEY);
     return {
       mode: 'local',
-      async load() { return { ...map }; },
+      async load() { return { records: { ...records }, items: { ...items } }; },
       async save(record) {
-        map[record.item_id] = record;
-        try { localStorage.setItem(LOCAL_KEY, JSON.stringify(map)); }
-        catch (e) { throw new Error('This browser blocked local storage'); }
+        records[record.item_id] = record;
+        writeJson(STATUS_KEY, records);
       },
-      subscribe(onRecords) {
+      async saveItem(item) {
+        items[item.id] = item;
+        writeJson(ITEMS_KEY, items);
+      },
+      subscribe(onRecords, onItems) {
         window.addEventListener('storage', e => {
-          if (e.key !== LOCAL_KEY) return;
-          try { map = JSON.parse(e.newValue || '{}'); } catch (err) { return; }
-          onRecords(Object.values(map));
+          if (e.key === STATUS_KEY) { records = readJson(STATUS_KEY); onRecords(Object.values(records)); }
+          if (e.key === ITEMS_KEY) { items = readJson(ITEMS_KEY); onItems(Object.values(items)); }
         });
       },
     };
@@ -29,21 +42,35 @@
     return {
       mode: 'shared',
       async load() {
-        const { data, error } = await client.from(TABLE).select('item_id,market,status,note,updated_at');
-        if (error) throw new Error(error.message);
-        const map = {};
-        for (const row of data) map[row.item_id] = row;
-        return map;
+        const [s, i] = await Promise.all([
+          client.from(STATUS_TABLE).select('item_id,market,status,note,updated_at'),
+          client.from(ITEMS_TABLE).select('id,data'),
+        ]);
+        if (s.error) throw new Error(s.error.message);
+        if (i.error) throw new Error(i.error.message);
+        const records = {};
+        for (const row of s.data) records[row.item_id] = row;
+        const items = {};
+        for (const row of i.data) items[row.id] = { ...row.data, id: row.id };
+        return { records, items };
       },
       async save(record) {
-        const { error } = await client.from(TABLE).upsert(record, { onConflict: 'item_id' });
+        const { error } = await client.from(STATUS_TABLE).upsert(record, { onConflict: 'item_id' });
         if (error) throw new Error(error.message);
       },
-      subscribe(onRecords, onConnection) {
+      async saveItem(item) {
+        const row = { id: item.id, market: item.market, data: item, updated_at: new Date().toISOString() };
+        const { error } = await client.from(ITEMS_TABLE).upsert(row, { onConflict: 'id' });
+        if (error) throw new Error(error.message);
+      },
+      subscribe(onRecords, onItems, onConnection) {
         client
-          .channel('launch_status_changes')
-          .on('postgres_changes', { event: '*', schema: 'public', table: TABLE }, payload => {
+          .channel('gate_board_changes')
+          .on('postgres_changes', { event: '*', schema: 'public', table: STATUS_TABLE }, payload => {
             if (payload.new && payload.new.item_id) onRecords([payload.new]);
+          })
+          .on('postgres_changes', { event: '*', schema: 'public', table: ITEMS_TABLE }, payload => {
+            if (payload.new && payload.new.id) onItems([{ ...payload.new.data, id: payload.new.id }]);
           })
           .subscribe(status => onConnection && onConnection(status));
       },

@@ -31,6 +31,10 @@
 
       <div class="topbar-actions">
         <span class="conn-badge" id="connBadge" data-state="loading"><span class="conn-dot"></span><span id="connText">Loading…</span></span>
+        <button id="addTaskBtn" class="btn btn-primary" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          <span>Add task</span>
+        </button>
         <button id="copyBtn" class="btn" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h8"/></svg>
           <span>Copy outstanding</span>
@@ -155,6 +159,103 @@
     <div class="drawer-body" id="drawerBody"></div>
   </aside>
 
+  <div class="drawer-backdrop" id="panelBackdrop"></div>
+  <aside class="drawer task-panel" id="taskPanel" aria-label="Task details" aria-hidden="true">
+    <div class="drawer-head">
+      <div class="panel-nav">
+        <button class="icon-btn" id="panelPrev" type="button" aria-label="Previous task">
+          <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
+        <button class="icon-btn" id="panelNext" type="button" aria-label="Next task">
+          <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <span class="panel-pos mono" id="panelPos"></span>
+      </div>
+      <div class="panel-actions">
+        <button class="btn btn-sm" id="panelCopyLink" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+          <span>Copy link</span>
+        </button>
+        <button class="icon-btn" id="panelClose" type="button" aria-label="Close task details">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="drawer-body" id="panelBody"></div>
+  </aside>
+
+  <div class="modal-backdrop" id="taskFormModal" hidden>
+    <form class="modal task-form" id="taskForm" novalidate>
+      <div class="modal-head">
+        <h2 id="taskFormTitle">Add a task</h2>
+        <button class="icon-btn" id="taskFormClose" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <p class="modal-hint">Use role names, not people's names. Added tasks count toward progress and gates like any other task.</p>
+
+      <div class="form-grid">
+        <label class="field span-2">
+          <span class="field-label">Task <b aria-hidden="true">*</b></span>
+          <input type="text" id="fTitle" maxlength="200" placeholder="e.g. Assign a main image owner and get sign-off before go-live" required>
+          <span class="field-error" id="fTitleError" hidden>Enter a short task title.</span>
+        </label>
+        <label class="field span-2">
+          <span class="field-label">Details</span>
+          <textarea id="fDetail" maxlength="1000" rows="3" placeholder="What done looks like, and anything the owner needs to know"></textarea>
+        </label>
+        <label class="field">
+          <span class="field-label">Marketplace</span>
+          <select id="fMarket"><option value="CA">Canada · Amazon.ca</option><option value="US">USA · Amazon.com</option></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Phase</span>
+          <select id="fPhase"><option value="pre">Pre-launch</option><option value="post">Post-launch</option></select>
+        </label>
+        <label class="field span-2">
+          <span class="field-label">Workstream</span>
+          <select id="fSection"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Owner role</span>
+          <select id="fOwner"></select>
+        </label>
+        <label class="field">
+          <span class="field-label">When</span>
+          <input type="text" id="fWhen" list="whenOptions" placeholder="e.g. T-21" maxlength="8">
+          <datalist id="whenOptions"></datalist>
+          <span class="field-error" id="fWhenError" hidden>Use T-21, T0, T+7 or Weekly.</span>
+        </label>
+        <label class="field">
+          <span class="field-label">Scope</span>
+          <select id="fScope"><option value="P">Per product</option><option value="L">Once per launch</option></select>
+        </label>
+        <label class="field">
+          <span class="field-label">Source tag</span>
+          <select id="fSource">
+            <option value="OBS">OBS · proven practice</option>
+            <option value="ADD">ADD · required addition</option>
+            <option value="VERIFY">VERIFY · confirm first</option>
+          </select>
+        </label>
+        <label class="switch field span-2">
+          <input type="checkbox" id="fBlocking">
+          <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+          <span>Blocking: must be done (or N/A with a reason) before the phase closes</span>
+        </label>
+        <label class="field span-2">
+          <span class="field-label">Link (optional)</span>
+          <input type="url" id="fLink" maxlength="500" placeholder="Slack thread, Google Doc or Drive folder">
+          <span class="field-error" id="fLinkError" hidden>Links must start with https://</span>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="btn" type="button" id="taskFormCancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="taskFormSubmit">Add task</button>
+      </div>
+    </form>
+  </div>
+
   <div class="modal-backdrop" id="copyModal" hidden>
     <div class="modal" role="dialog" aria-label="Outstanding items">
       <div class="modal-head">
@@ -173,6 +274,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
   <script src="config.js"></script>
   <script src="data/checklist.js"></script>
+  <script src="data/examples.js"></script>
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
 </body>
