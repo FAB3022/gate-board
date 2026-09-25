@@ -23,7 +23,7 @@ function trackErrors(page) {
 test.describe('browser-only mode', () => {
   test('renders every checklist item for both markets with no errors', async ({ page }) => {
     const errors = trackErrors(page);
-    await page.goto('/');
+    await page.goto('./');
     const counts = await page.evaluate(() => ({ CA: window.CHECKLIST.CA.length, US: window.CHECKLIST.US.length }));
     expect(counts).toEqual({ CA: 117, US: 105 });
     await expect(rows(page)).toHaveCount(117);
@@ -47,7 +47,7 @@ test.describe('browser-only mode', () => {
   });
 
   test('filters and grouping narrow and reorganise the list', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     const expected = await page.evaluate(() => {
       const ca = window.CHECKLIST.CA;
       return {
@@ -89,7 +89,7 @@ test.describe('browser-only mode', () => {
   });
 
   test('one-click check and the status menu save and survive reload', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await row(page, 'CA-PRE-059').locator('.check').click();
     await expect(row(page, 'CA-PRE-059')).toHaveAttribute('data-status', 'done');
     await expect(page.locator('#progressOverallText')).toHaveText('1 / 117');
@@ -124,7 +124,7 @@ test.describe('browser-only mode', () => {
   });
 
   test('summary tiles filter the list and toggle off again', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await setStatus(page, 'CA-PRE-010', 'in_progress');
     await setStatus(page, 'CA-PRE-011', 'blocked');
     await row(page, 'CA-PRE-012').locator('.check').click();
@@ -142,7 +142,7 @@ test.describe('browser-only mode', () => {
   });
 
   test('gate 3 needs every pre-launch blocking item', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     const ids = await page.evaluate(() => window.CHECKLIST.US.filter(i => i.phase === 'pre' && i.blocking).map(i => i.id));
     await page.evaluate(ids => {
       const map = {};
@@ -159,7 +159,7 @@ test.describe('browser-only mode', () => {
   });
 
   test('lessons, playbook and jump-to-item work', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await row(page, 'CA-PRE-086').getByRole('button', { name: 'Why this step exists' }).click();
     await expect(row(page, 'CA-PRE-086').locator('.lesson')).toContainText('preorder');
 
@@ -176,7 +176,7 @@ test.describe('browser-only mode', () => {
 
   test('groups collapse and stay collapsed; sidebar links jump to groups', async ({ page }) => {
     await page.setViewportSize({ width: 1400, height: 900 });
-    await page.goto('/');
+    await page.goto('./');
     await page.locator('.group-head').first().click();
     await expect(page.locator('.group').first()).toHaveClass(/collapsed/);
     await page.reload();
@@ -187,7 +187,7 @@ test.describe('browser-only mode', () => {
 
   test('copy outstanding produces the channel repost', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-    await page.goto('/');
+    await page.goto('./');
     await setStatus(page, 'CA-PRE-020', 'blocked');
     await writeNote(page, 'CA-PRE-020', 'Manufacturer NPN licence copy');
     await page.getByRole('button', { name: 'Copy outstanding' }).click();
@@ -202,7 +202,7 @@ test.describe('browser-only mode', () => {
 
   test('fits a phone screen without sideways scrolling', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/');
+    await page.goto('./');
     await expect(rows(page)).toHaveCount(117);
     await setStatus(page, 'CA-PRE-001', 'in_progress');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -247,7 +247,7 @@ test.describe('shared mode (simulated Supabase)', () => {
 
   test('loads, saves and receives live changes', async ({ page }) => {
     const errors = trackErrors(page);
-    await page.goto('/');
+    await page.goto('./');
     await expect(page.locator('#connText')).toHaveText('Shared · live');
     await expect(page.locator('#setupNote')).toBeHidden();
     await expect(row(page, 'CA-PRE-001')).toHaveAttribute('data-status', 'done');
@@ -268,7 +268,7 @@ test.describe('shared mode (simulated Supabase)', () => {
   });
 
   test('a failed save is undone and explained', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await expect(page.locator('#connText')).toHaveText('Shared · live');
     await page.evaluate(() => { window.__failNext = true; });
     await row(page, 'CA-PRE-012').locator('.check').click();
@@ -277,7 +277,7 @@ test.describe('shared mode (simulated Supabase)', () => {
   });
 
   test('live update does not wipe a note being typed', async ({ page }) => {
-    await page.goto('/');
+    await page.goto('./');
     await setStatus(page, 'CA-PRE-020', 'blocked');
     const note = row(page, 'CA-PRE-020').locator('.note-input');
     await note.click();
@@ -295,7 +295,7 @@ test('real Supabase library loads and an unreachable project is reported', async
     contentType: 'text/javascript',
     body: "window.GATE_BOARD_CONFIG = { supabaseUrl: 'http://127.0.0.1:9', supabaseAnonKey: 'anon-test' };",
   }));
-  await page.goto('/');
+  await page.goto('./');
   expect(await page.evaluate(() => typeof window.supabase.createClient)).toBe('function');
   await expect(page.locator('#connText')).toHaveText('Not connected', { timeout: 15000 });
   await expect(page.locator('#toast')).toContainText('Retrying in 15 seconds');
