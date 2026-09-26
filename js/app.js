@@ -154,7 +154,8 @@
   // "Verify PDP: title, bullets…" → title "Verify PDP", detail "Title, bullets…"
   function splitTask(task) {
     const colon = task.match(/^(.{6,70}?):\s+(.+)$/);
-    if (colon && !/^Gate \d$/.test(colon[1])) return [colon[1], capitalize(colon[2])];
+    const balanced = s => (s.match(/\(/g) || []).length === (s.match(/\)/g) || []).length;
+    if (colon && !/^Gate \d$/.test(colon[1]) && balanced(colon[1])) return [colon[1], capitalize(colon[2])];
     const semi = task.indexOf('; ');
     if (semi > 0 && semi < 110) return [task.slice(0, semi), capitalize(task.slice(semi + 2))];
     return [task, ''];
